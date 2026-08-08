@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router';
+import { Check } from 'lucide-vue-next';
 import type { Photo } from '../types';
 import PhotoCard from './PhotoCard.vue';
-import { openViewer } from '../store/library';
+import { openViewer, selection, toggleSelect } from '../store/library';
 import { formatBytes, formatTimestamp } from '../utils/format';
 
 const props = defineProps<{
@@ -20,18 +21,32 @@ function open(photo: Photo, index: number) {
   openViewer(props.photos, index, props.albumId, props.context);
   router.push({ path: `/viewer/${photo.id}` });
 }
+
+/** 选择模式下点击切换选择，否则打开查看器 */
+function onCardClick(photo: Photo, index: number) {
+  if (selection.active) toggleSelect(photo.id);
+  else open(photo, index);
+}
 </script>
 
 <template>
   <div v-if="view === 'grid'" class="photo-grid">
-    <div v-for="(p, i) in photos" :key="p.id" class="grid-cell" @click="open(p, i)">
-      <PhotoCard :photo="p" />
+    <div v-for="(p, i) in photos" :key="p.id" class="grid-cell" @click="onCardClick(p, i)">
+      <PhotoCard
+        :photo="p"
+        :selectable="selection.active"
+        :selected="selection.active && selection.ids.has(p.id)"
+        @toggle-select="toggleSelect(p.id)"
+      />
     </div>
   </div>
 
   <div v-else class="photo-list">
-    <div v-for="(p, i) in photos" :key="p.id" class="list-row" @click="open(p, i)">
-      <img class="list-thumb" :src="p.src" :alt="p.name" loading="lazy" />
+    <div v-for="(p, i) in photos" :key="p.id" class="list-row" @click="onCardClick(p, i)">
+      <span v-if="selection.active" class="list-check" :class="{ checked: selection.ids.has(p.id) }">
+        <Check v-if="selection.ids.has(p.id)" :size="12" stroke-width="3.5" />
+      </span>
+      <img class="list-thumb" :src="p.src" :alt="p.name" loading="lazy" decoding="async" />
       <div class="list-main">
         <span class="list-name">{{ p.name }}</span>
         <span class="list-meta">{{ formatTimestamp(p.importedAt) }} · {{ p.format }}</span>
@@ -108,6 +123,25 @@ function open(photo: Photo, index: number) {
   color: var(--muted-foreground);
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
+}
+
+/* 列表视图选择勾选 */
+.list-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border);
+  background: var(--background);
+  color: var(--primary-foreground);
+  flex-shrink: 0;
+  transition: background-color 0.18s ease, border-color 0.18s ease;
+}
+.list-check.checked {
+  background: var(--primary);
+  border-color: var(--primary);
 }
 
 @media (max-width: 1280px) {

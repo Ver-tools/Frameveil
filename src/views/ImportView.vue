@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { open } from '@tauri-apps/plugin-dialog';
-import { Upload, Check, ChevronDown, FileText } from 'lucide-vue-next';
+import { Upload, Check, ChevronDown, FileText, X } from 'lucide-vue-next';
 import AppShell from '../components/AppShell.vue';
 import ToggleSwitch from '../components/ToggleSwitch.vue';
 import { library, runImport, loadImageSize, toast } from '../store/library';
@@ -16,12 +16,17 @@ const router = useRouter();
 
 const albumName = ref('');
 const tagsInput = ref('');
-const autoOrganize = ref(true);
-const smartAlbum = ref(false);
+const autoOrganize = ref(library.settings.autoOrganize);
+const smartAlbum = ref(library.settings.smartAlbum);
 
 const pending = ref<PendingFile[]>([]);
 const importing = ref(false);
 const dragging = ref(false);
+
+/** 移除一个待导入文件 */
+function removeFile(path: string) {
+  pending.value = pending.value.filter((f) => f.path !== path);
+}
 
 /** 存储位置显示文案 */
 const storageLabel = computed(() => `默认位置 › ${storageLocationLabel()}`);
@@ -117,6 +122,8 @@ async function doImport() {
       files: pending.value,
       albumName: name,
       tags,
+      smartAlbum: smartAlbum.value,
+      autoOrganize: autoOrganize.value,
     });
     if (album) {
       router.push(`/album/${album.id}`);
@@ -232,6 +239,9 @@ onUnmounted(() => {
               <Check :size="14" />
               就绪
             </span>
+            <button class="file-remove" type="button" title="移除" aria-label="移除文件" @click="removeFile(f.path)">
+              <X :size="14" />
+            </button>
           </div>
           <div v-if="!pending.length" class="file-empty">尚未选择任何文件</div>
         </div>
@@ -446,6 +456,27 @@ onUnmounted(() => {
   color: var(--state-success);
   font-size: 12px;
   flex-shrink: 0;
+}
+.file-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.18s ease, background-color 0.18s ease, color 0.18s ease;
+}
+.file-row:hover .file-remove {
+  opacity: 1;
+}
+.file-remove:hover {
+  background: var(--secondary);
+  color: var(--destructive);
 }
 .file-empty {
   padding: 24px;

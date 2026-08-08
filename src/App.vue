@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { watch, onMounted } from 'vue';
-import { library } from './store/library';
+import { useRoute } from 'vue-router';
+import { library, setSelectMode } from './store/library';
+
+const route = useRoute();
 
 /** 应用主题：浅色 / 深色 / 自动 */
 function applyTheme(theme: string) {
@@ -17,12 +20,23 @@ watch(
   { immediate: true }
 );
 
+/** 路由切换时退出照片选择模式 */
+watch(
+  () => route.path,
+  () => setSelectMode(false)
+);
+
 onMounted(() => {
   const mq = window.matchMedia('(prefers-color-scheme: dark)');
   const handler = () => applyTheme(library.settings.theme);
   mq.addEventListener('change', handler);
   // 跟随系统时同步初始状态
   applyTheme(library.settings.theme);
+
+  // Esc 退出照片选择模式
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') setSelectMode(false);
+  });
 });
 </script>
 

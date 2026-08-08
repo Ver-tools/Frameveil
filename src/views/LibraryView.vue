@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
-import { CirclePlus, Grip, List } from 'lucide-vue-next';
+import { CirclePlus, Grip, List, SearchX } from 'lucide-vue-next';
 import AppShell from '../components/AppShell.vue';
+import PhotoGrid from '../components/PhotoGrid.vue';
 import { albumsWithCounts, library } from '../store/library';
 
 const router = useRouter();
@@ -22,8 +23,29 @@ const filteredAlbums = computed(() => {
   });
 });
 
+/** 搜索匹配的照片（按名称 / 标签 / 所属写真集） */
+const matchedPhotos = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase();
+  if (!q) return [];
+  return library.photos
+    .filter((p) => {
+      if (p.inTrash) return false;
+      const albumName = library.albums.find((a) => a.id === p.albumId)?.name ?? '';
+      return (
+        p.name.toLowerCase().includes(q) ||
+        albumName.toLowerCase().includes(q) ||
+        p.tags.some((t) => t.toLowerCase().includes(q))
+      );
+    })
+    .slice(0, 24);
+});
+
 const totalPhotos = computed(() =>
   albumsWithCounts.value.reduce((sum, a) => sum + a.photoCount, 0)
+);
+
+const hasResult = computed(
+  () => filteredAlbums.value.length > 0 || matchedPhotos.value.length > 0
 );
 
 function setView(v: 'grid' | 'list') {
@@ -120,8 +142,20 @@ function openAlbum(id: string) {
         </div>
       </div>
 
-      <div v-if="!filteredAlbums.length" class="empty-state">
-        <p class="empty-desc">没有找到匹配的写真集</p>
+      <!-- 搜索匹配的照片 -->
+      <div v-if="searchQuery.trim() && matchedPhotos.length" class="search-photos">
+        <h2 class="search-section-title">照片 · {{ matchedPhotos.length }}</h2>
+        <PhotoGrid
+          :photos="matchedPhotos"
+          :view="'grid'"
+          :context="{ label: '搜索结果', route: '/' }"
+        />
+      </div>
+
+      <div v-if="!hasResult" class="empty-state">
+        <SearchX :size="40" class="empty-icon" />
+        <p class="empty-title">没有找到匹配的内容</p>
+        <p class="empty-desc">试试其他关键词，或检查写真集名称 / 照片名称 / 标签</p>
       </div>
     </div>
   </AppShell>
@@ -303,5 +337,22 @@ function openAlbum(id: string) {
   color: var(--muted-foreground);
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
+}
+
+/* 搜索结果照片区 */
+.search-photos {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+}
+.search-section-title {
+  margin: 0 0 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--muted-foreground);
+}
+.empty-icon {
+  color: var(--muted-foreground);
+  opacity: 0.7;
 }
 </style>

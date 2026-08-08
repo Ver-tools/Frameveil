@@ -4,8 +4,10 @@ import { ChevronDown, ExternalLink, FolderOpen } from 'lucide-vue-next';
 import AppShell from '../components/AppShell.vue';
 import ToggleSwitch from '../components/ToggleSwitch.vue';
 import SegControl from '../components/SegControl.vue';
+import Modal from '../components/Modal.vue';
 import { library, toast } from '../store/library';
 import { formatBytes } from '../utils/format';
+import { getCacheSize, clearAppCache } from '../utils/cache';
 import {
   pickStorageLocation,
   resetStorageLocation,
@@ -47,15 +49,52 @@ async function onResetLocation() {
   if (await resetStorageLocation()) refreshStorage();
 }
 
-function clearCache() {
-  toast('缓存已清理', 'success');
+/* ── 清理缓存 ── */
+const cacheSize = ref(0);
+
+async function refreshCache() {
+  cacheSize.value = await getCacheSize();
+}
+
+async function onClearCache() {
+  const cleared = await clearAppCache();
+  await refreshCache();
+  toast(cleared > 0 ? `已清理 ${formatBytes(cleared)} 缓存` : '没有需要清理的缓存', 'success');
 }
 
 function checkUpdate() {
   toast('当前已是最新版本', 'success');
 }
 
-onMounted(refreshStorage);
+/* ── 协议 / 隐私政策弹窗 ── */
+const legalOpen = ref(false);
+const legalTitle = ref('');
+const legalBody = ref('');
+
+function openLegal(title: string, body: string) {
+  legalTitle.value = title;
+  legalBody.value = body;
+  legalOpen.value = true;
+}
+
+const agreementBody =
+  '欢迎使用 Frameveil 写真照片管理工具。\n\n' +
+  '1. 本软件为本地优先的照片管理工具，照片文件默认存储于你的本机目录，你可随时在「设置 → 存储」中更改存储位置。\n' +
+  '2. 你导入的照片与元数据仅保存在本地，本软件不会上传、收集或共享你的照片内容。\n' +
+  '3. 内置示例照片仅用于功能演示，删除或导出不会影响你的原始文件（内置照片无原始文件）。\n' +
+  '4. 使用本软件即表示你同意以上条款。';
+
+const privacyBody =
+  '隐私保护说明：\n\n' +
+  '· 照片内容：所有照片均在本地处理与存储，不会上传至任何服务器。\n' +
+  '· 元数据：拍摄信息（相机、镜头等）仅在你的设备上展示。\n' +
+  '· 设置与图库信息：以本地缓存形式保存在你的设备中，可在「设置 → 存储 → 清理缓存」中清除。\n' +
+  '· 分析数据：默认关闭，开启后仅在你本机记录匿名使用统计，不会外传。';
+
+onMounted(() => {
+  refreshStorage();
+  refreshCache();
+});
 </script>
 
 <template>
@@ -112,8 +151,11 @@ onMounted(refreshStorage);
             </div>
           </div>
           <div class="setting-row">
-            <span class="row-label">清理缓存</span>
-            <button class="pill-btn" type="button" @click="clearCache">清理</button>
+            <div>
+              <div class="row-label">清理缓存</div>
+              <div class="row-desc">缓存 {{ formatBytes(cacheSize) }}</div>
+            </div>
+            <button class="pill-btn" type="button" @click="onClearCache">清理</button>
           </div>
           <div class="setting-row">
             <span class="row-label">自动备份</span>
@@ -188,19 +230,27 @@ onMounted(refreshStorage);
           </div>
           <div class="setting-row">
             <span class="row-label">用户协议</span>
-            <span class="link-trigger" role="link" tabindex="0" @click="toast('用户协议（示例）', 'info')">
+            <span class="link-trigger" role="link" tabindex="0" @click="openLegal('用户协议', agreementBody)">
               <ExternalLink :size="16" />
             </span>
           </div>
           <div class="setting-row">
             <span class="row-label">隐私政策</span>
-            <span class="link-trigger" role="link" tabindex="0" @click="toast('隐私政策（示例）', 'info')">
+            <span class="link-trigger" role="link" tabindex="0" @click="openLegal('隐私政策', privacyBody)">
               <ExternalLink :size="16" />
             </span>
           </div>
         </div>
       </section>
     </div>
+
+    <!-- 用户协议 / 隐私政策 -->
+    <Modal v-if="legalOpen" :title="legalTitle" @close="legalOpen = false">
+      <p class="legal-body">{{ legalBody }}</p>
+      <div class="modal-actions">
+        <button class="btn btn-primary" type="button" @click="legalOpen = false">我知道了</button>
+      </div>
+    </Modal>
   </AppShell>
 </template>
 
@@ -362,5 +412,12 @@ onMounted(refreshStorage);
   font-family: var(--font-mono);
   color: var(--muted-foreground);
   font-size: 13px;
+}
+.legal-body {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--muted-foreground);
+  white-space: pre-line;
 }
 </style>

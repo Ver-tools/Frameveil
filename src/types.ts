@@ -47,6 +47,10 @@ export interface Album {
   /** 期号，如 2024.03 */
   period: string;
   createdAt: number;
+  /** 写真集标签（智能相册按标签聚合照片） */
+  tags: string[];
+  /** 是否为智能相册：自动聚合全库中匹配标签的照片 */
+  isSmart?: boolean;
 }
 
 /** 应用设置 */

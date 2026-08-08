@@ -81,22 +81,44 @@ fn unique_target(dest: &Path, file_name: &str) -> PathBuf {
 }
 
 /// 将源照片文件复制到目标目录（导入 / 导出磁盘文件时使用），返回复制后的新路径列表。
-/// 自动创建目标目录，并对同名文件做重命名处理，避免覆盖已有照片。
+/// 自动创建目标目录；`on_duplicate` 控制同名文件的处理策略：
+///   - "skip"：跳过并复用已存在的文件
+///   - "overwrite"：覆盖已存在的文件
+///   - 其他（默认 "rename"）：自动追加 (1)、(2)… 重命名，避免覆盖
 #[tauri::command]
-fn copy_photos(sources: Vec<String>, dest_dir: String) -> Result<Vec<String>, String> {
+fn copy_photos(
+    sources: Vec<String>,
+    dest_dir: String,
+    on_duplicate: Option<String>,
+) -> Result<Vec<String>, String> {
     let dest = PathBuf::from(&dest_dir);
     fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
+    let policy = on_duplicate.unwrap_or_else(|| "rename".to_string());
     let mut copied = Vec::new();
     for src in sources {
         let path = Path::new(&src);
         if !path.exists() {
+            // 源文件不存在：保持原路径，交由前端自行处理
+            copied.push(src.clone());
             continue;
         }
         let file_name = path
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .ok_or("无效的文件名")?;
-        let target = unique_target(&dest, &file_name);
+        let direct = dest.join(&file_name);
+        let target = if direct.exists() {
+            match policy.as_str() {
+                "skip" => {
+                    copied.push(direct.to_string_lossy().to_string());
+                    continue;
+                }
+                "overwrite" => direct,
+                _ => unique_target(&dest, &file_name),
+            }
+        } else {
+            direct
+        };
         fs::copy(path, &target).map_err(|e| e.to_string())?;
         copied.push(target.to_string_lossy().to_string());
     }
@@ -137,6 +159,22 @@ fn library_dir(app: tauri::AppHandle) -> Result<String, String> {
     Ok(lib.to_string_lossy().to_string())
 }
 
+/// 递归统计目录占用空间（字节）
+fn dir_size(d: &Path) -> u64 {
+    let mut total: u64 = 0;
+    if let Ok(rd) = fs::read_dir(d) {
+        for entry in rd.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                total += dir_size(&p);
+            } else if let Ok(meta) = entry.metadata() {
+                total += meta.len();
+            }
+        }
+    }
+    total
+}
+
 /// 统计指定目录（未指定时统计默认图库目录）已占用的磁盘空间（字节）
 #[tauri::command]
 fn storage_used(app: tauri::AppHandle, path: Option<String>) -> Result<u64, String> {
@@ -148,24 +186,43 @@ fn storage_used(app: tauri::AppHandle, path: Option<String>) -> Result<u64, Stri
             .map_err(|e| e.to_string())?
             .join("Library"),
     };
+    Ok(dir_size(&dir))
+}
+
+/// 返回（并创建）缓存目录
+#[tauri::command]
+fn cache_dir(app: tauri::AppHandle) -> Result<String, String> {
+    let dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.to_string_lossy().to_string())
+}
+
+/// 统计缓存目录占用空间（字节）
+#[tauri::command]
+fn cache_size(app: tauri::AppHandle) -> Result<u64, String> {
+    let dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
+    Ok(dir_size(&dir))
+}
+
+/// 清空缓存目录，返回本次清理的字节数
+#[tauri::command]
+fn clear_cache(app: tauri::AppHandle) -> Result<u64, String> {
+    let dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
     if !dir.exists() {
         return Ok(0);
     }
-    let mut total: u64 = 0;
-    fn walk(d: &Path, total: &mut u64) -> std::io::Result<()> {
-        for entry in fs::read_dir(d)? {
-            let entry = entry?;
-            let p = entry.path();
-            if p.is_dir() {
-                walk(&p, total)?;
-            } else {
-                *total += entry.metadata()?.len();
-            }
+    let mut cleared: u64 = 0;
+    for entry in fs::read_dir(&dir).map_err(|e| e.to_string())? {
+        let p = entry.map_err(|e| e.to_string())?.path();
+        if p.is_dir() {
+            cleared += dir_size(&p);
+            fs::remove_dir_all(&p).map_err(|e| e.to_string())?;
+        } else if p.is_file() {
+            cleared += fs::metadata(&p).map_err(|e| e.to_string())?.len();
+            fs::remove_file(&p).map_err(|e| e.to_string())?;
         }
-        Ok(())
     }
-    walk(&dir, &mut total).map_err(|e| e.to_string())?;
-    Ok(total)
+    Ok(cleared)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -180,7 +237,10 @@ pub fn run() {
             delete_photos,
             library_dir,
             ensure_dir,
-            storage_used
+            storage_used,
+            cache_dir,
+            cache_size,
+            clear_cache
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
+import { Tag } from 'lucide-vue-next';
 import AppShell from '../components/AppShell.vue';
 import PhotoGrid from '../components/PhotoGrid.vue';
-import { allTags, library } from '../store/library';
+import PhotoBatchBar from '../components/PhotoBatchBar.vue';
+import { allTags, library, selection, setSelectMode } from '../store/library';
 
 const activeTag = ref('');
 
@@ -22,6 +24,15 @@ const photos = computed(() => {
           <h1 class="page-title">标签</h1>
           <p class="subtitle">{{ activeTag ? `${photos.length} 张照片` : `${tags.length} 个标签` }}</p>
         </div>
+        <button
+          v-if="activeTag && photos.length"
+          class="select-trigger"
+          :class="{ active: selection.active }"
+          type="button"
+          @click="setSelectMode(!selection.active)"
+        >
+          {{ selection.active ? '退出选择' : '选择' }}
+        </button>
       </div>
 
       <div class="tag-bar">
@@ -38,12 +49,25 @@ const photos = computed(() => {
         <span v-if="!tags.length" class="tag-empty">暂无标签</span>
       </div>
 
-      <div v-if="activeTag" class="tag-photos">
-        <PhotoGrid :photos="photos" :view="library.settings.defaultView" :context="{ label: `标签：${activeTag}`, route: '/tags' }" />
-      </div>
+      <PhotoGrid
+        v-if="activeTag && photos.length"
+        :photos="photos"
+        :view="library.settings.defaultView"
+        :context="{ label: `标签：${activeTag}`, route: '/tags' }"
+      />
+
       <div v-else-if="tags.length" class="empty-state">
+        <Tag :size="48" class="empty-icon" />
         <p class="empty-desc">选择一个标签以查看对应的照片</p>
       </div>
+
+      <div v-else class="empty-state">
+        <Tag :size="48" class="empty-icon" />
+        <p class="empty-title">暂无标签</p>
+        <p class="empty-desc">编辑照片信息即可为照片添加标签</p>
+      </div>
+
+      <PhotoBatchBar v-if="selection.active" :photos="photos" />
     </div>
   </AppShell>
 </template>
@@ -70,6 +94,28 @@ const photos = computed(() => {
   font-size: 14px;
   color: var(--muted-foreground);
 }
+.select-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 999px;
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  font-size: 13px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+.select-trigger:hover {
+  background: var(--muted);
+}
+.select-trigger.active {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
 .tag-bar {
   display: flex;
   flex-wrap: wrap;
@@ -78,6 +124,9 @@ const photos = computed(() => {
 }
 .tag-empty {
   font-size: 13px;
+  color: var(--muted-foreground);
+}
+.empty-icon {
   color: var(--muted-foreground);
 }
 </style>

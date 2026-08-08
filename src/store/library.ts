@@ -62,6 +62,34 @@ export const library = reactive({
   } | null,
 });
 
+/** 照片多选状态（各照片网格共享的瞬时选择） */
+export const selection = reactive({
+  active: false,
+  ids: new Set<string>(),
+});
+
+/** 进入 / 退出选择模式 */
+export function setSelectMode(active: boolean) {
+  selection.active = active;
+  if (!active) selection.ids.clear();
+}
+
+/** 切换单张照片的选择状态 */
+export function toggleSelect(id: string) {
+  if (selection.ids.has(id)) selection.ids.delete(id);
+  else selection.ids.add(id);
+}
+
+/** 全选 / 全不选（传入当前可见照片 id 列表） */
+export function selectAllIds(ids: string[]) {
+  selection.ids = new Set(ids);
+}
+
+/** 清空选择 */
+export function clearSelection() {
+  selection.ids.clear();
+}
+
 /* ── 持久化 ─────────────────────────────────────────────── */
 let saveTimer: number | undefined;
 watch(
@@ -129,6 +157,29 @@ export function albumPhotos(albumId: string): Photo[] {
   return photosOfAlbum(albumId);
 }
 
+/** 智能相册：直接照片 + 全库中匹配写真集标签的照片；普通写真集仅返回直接照片 */
+export function albumPhotosSmart(album: Album): Photo[] {
+  if (!album.isSmart) return photosOfAlbum(album.id);
+  const tags = album.tags ?? [];
+  return library.photos.filter(
+    (p) => !p.inTrash && (p.albumId === album.id || (tags.length > 0 && p.tags.some((t) => tags.includes(t))))
+  );
+}
+
+/** 删除写真集：其照片移入回收站，并移除写真集记录 */
+export function deleteAlbum(id: string) {
+  const a = albumById(id);
+  if (!a) return;
+  library.photos.forEach((p) => {
+    if (p.albumId === id && !p.inTrash) {
+      p.inTrash = true;
+      p.trashedAt = Date.now();
+    }
+  });
+  library.albums = library.albums.filter((x) => x.id !== id);
+  toast('写真集已删除，照片已移入回收站', 'success');
+}
+
 /* ── 照片操作 ───────────────────────────────────────────── */
 export function updatePhoto(id: string, patch: Partial<Photo>) {
   const p = library.photos.find((x) => x.id === id);
@@ -150,6 +201,33 @@ export function trashPhoto(id: string) {
     p.trashedAt = Date.now();
     toast('已移入回收站', 'info');
   }
+}
+
+/** 批量收藏 / 取消收藏 */
+export function favoritePhotos(ids: Iterable<string>, value = true) {
+  let n = 0;
+  for (const id of ids) {
+    const p = photoById(id);
+    if (p && !p.inTrash) {
+      p.isFavorite = value;
+      n += 1;
+    }
+  }
+  toast(value ? `已收藏 ${n} 张照片` : `已取消收藏 ${n} 张照片`, 'success');
+}
+
+/** 批量移入回收站 */
+export function trashPhotos(ids: Iterable<string>) {
+  let n = 0;
+  for (const id of ids) {
+    const p = photoById(id);
+    if (p && !p.inTrash) {
+      p.inTrash = true;
+      p.trashedAt = Date.now();
+      n += 1;
+    }
+  }
+  if (n) toast(`已将 ${n} 张照片移入回收站`, 'info');
 }
 
 export function restorePhoto(id: string) {
@@ -227,12 +305,22 @@ export interface ImportPayload {
   albumName: string;
   tags: string[];
   targetAlbumId?: string;
+  /** 是否创建智能相册（按标签聚合全库照片） */
+  smartAlbum?: boolean;
+  /** 是否按写真集分子目录存放（默认 true） */
+  autoOrganize?: boolean;
+}
+
+/** 设置「重复文件处理」策略到 Rust 命令参数的映射 */
+function duplicatePolicy(): string {
+  const map: Record<string, string> = { 跳过: 'skip', 覆盖: 'overwrite', 重命名: 'rename' };
+  return map[library.settings.duplicateHandling] ?? 'rename';
 }
 
 /**
  * 执行导入：
- * 1. 获取图库目录（不存在则创建）
- * 2. 通过 Rust 命令把文件复制到 <图库>/<写真集>/
+ * 1. 获取存储位置（不存在则创建）
+ * 2. 通过 Rust 命令把文件复制到 <存储位置>/<写真集>/（自动整理关闭时直接复制到根目录）
  * 3. 建立写真集与照片记录
  */
 export async function runImport(payload: ImportPayload): Promise<Album | undefined> {
@@ -241,19 +329,21 @@ export async function runImport(payload: ImportPayload): Promise<Album | undefin
   try {
     libDir = libDir || (await invoke<string>('library_dir'));
   } catch {
-    toast('无法访问图库目录', 'error');
+    toast('无法访问存储位置', 'error');
     return undefined;
   }
   if (!library.settings.storageLocation) library.settings.storageLocation = libDir;
 
   const sanitized = sanitizeDirName(payload.albumName);
-  const destDir = `${libDir.replace(/[\\/]$/, '')}/${sanitized}`;
+  const root = libDir.replace(/[\\/]$/, '');
+  const destDir = payload.autoOrganize === false ? root : `${root}/${sanitized}`;
 
   let newPaths: string[] = [];
   try {
     newPaths = await invoke<string[]>('copy_photos', {
       sources: payload.files.map((f) => f.path),
       destDir,
+      onDuplicate: duplicatePolicy(),
     });
   } catch (e) {
     toast(`导入失败：${String(e)}`, 'error');
@@ -277,8 +367,14 @@ export async function runImport(payload: ImportPayload): Promise<Album | undefin
       dateRange: '',
       period: `${now.getFullYear()}.${mm}`,
       createdAt,
+      tags: [],
     };
     library.albums.push(album);
+  }
+  // 智能相册与标签
+  album.isSmart = Boolean(payload.smartAlbum);
+  if (payload.tags.length) {
+    album.tags = Array.from(new Set([...(album.tags ?? []), ...payload.tags]));
   }
 
   const idMap = new Map<string, string>();
@@ -317,7 +413,10 @@ export async function runImport(payload: ImportPayload): Promise<Album | undefin
   // 设置封面
   if (!album.coverSrc && newPhotos.length) album.coverSrc = newPhotos[0].src;
   if (!album.description) {
-    album.description = `于 ${now.getFullYear()} 年 ${now.getMonth() + 1} 月导入的写真集。`;
+    album.description =
+      album.isSmart && album.tags.length
+        ? `智能相册：自动聚合图库中匹配「${album.tags.join('、')}」标签的照片。`
+        : `于 ${now.getFullYear()} 年 ${now.getMonth() + 1} 月导入的写真集。`;
   }
   if (album.dateRange) {
     const start = album.dateRange.split(' — ')[0];

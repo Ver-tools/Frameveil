@@ -1,7 +1,15 @@
 <script setup lang="ts">
+import { Check } from 'lucide-vue-next';
 import type { Photo } from '../types';
 
-defineProps<{ photo: Photo }>();
+defineProps<{
+  photo: Photo;
+  /** 是否处于选择模式（显示勾选框） */
+  selectable?: boolean;
+  selected?: boolean;
+}>();
+
+const emit = defineEmits<{ (e: 'toggle-select'): void }>();
 
 function aspectClass(p: Photo): string {
   return p.width >= p.height ? 'aspect-landscape' : 'aspect-portrait';
@@ -9,8 +17,18 @@ function aspectClass(p: Photo): string {
 </script>
 
 <template>
-  <article class="photo-card" :class="aspectClass(photo)" :title="photo.name">
-    <img :src="photo.src" :alt="photo.name" loading="lazy" />
+  <article class="photo-card" :class="[aspectClass(photo), { selected }]" :title="photo.name">
+    <img :src="photo.src" :alt="photo.name" loading="lazy" decoding="async" />
+    <button
+      v-if="selectable"
+      class="select-badge"
+      :class="{ checked: selected }"
+      type="button"
+      :aria-label="selected ? '取消选择' : '选择'"
+      @click.stop="emit('toggle-select')"
+    >
+      <Check v-if="selected" :size="12" stroke-width="3.5" />
+    </button>
     <div class="photo-overlay">
       <span class="overlay-name">{{ photo.name }}</span>
       <span v-if="photo.isFavorite" class="overlay-fav">♥</span>
@@ -30,6 +48,10 @@ function aspectClass(p: Photo): string {
 }
 .photo-card:hover {
   border-color: var(--primary);
+}
+.photo-card.selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 45%, transparent);
 }
 .photo-card img {
   width: 100%;
@@ -63,6 +85,34 @@ function aspectClass(p: Photo): string {
 .overlay-fav {
   color: var(--tl-red);
   font-size: 12px;
+}
+
+/* 选择勾选框 */
+.select-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1.5px solid var(--background-50);
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--background-50);
+  cursor: pointer;
+  backdrop-filter: blur(2px);
+  transition: background-color 0.18s ease, border-color 0.18s ease;
+  padding: 0;
+}
+.select-badge:hover {
+  background: rgba(0, 0, 0, 0.55);
+}
+.select-badge.checked {
+  background: var(--primary);
+  border-color: var(--primary);
 }
 
 @media (prefers-reduced-motion: reduce) {

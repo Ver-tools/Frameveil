@@ -176,6 +176,7 @@ export function buildSeed(): { albums: Album[]; photos: Photo[] } {
       dateRange: fmtRange(seed.dateStart, seed.dateEnd),
       period: `${seed.dateStart[0]}.${String(seed.dateStart[1]).padStart(2, '0')}`,
       createdAt: base,
+      tags: [...seed.tags],
     });
 
     for (let i = 0; i < seed.count; i++) {
