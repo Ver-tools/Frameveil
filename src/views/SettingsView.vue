@@ -112,7 +112,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <AppShell title="设置">
+  <AppShell>
     <div class="page">
       <h1 class="page-title">设置</h1>
 

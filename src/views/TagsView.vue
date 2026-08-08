@@ -17,7 +17,7 @@ const photos = computed(() => {
 </script>
 
 <template>
-  <AppShell title="Frameveil">
+  <AppShell>
     <div class="page">
       <div class="content-header">
         <div>

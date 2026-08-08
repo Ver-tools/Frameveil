@@ -2,7 +2,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { open } from '@tauri-apps/plugin-dialog';
-import { ChevronDown, Grip, List, CheckSquare } from 'lucide-vue-next';
+import { ChevronDown, Grip, List, CheckSquare, ArrowLeft } from 'lucide-vue-next';
 import AppShell from '../components/AppShell.vue';
 import PhotoGrid from '../components/PhotoGrid.vue';
 import PhotoBatchBar from '../components/PhotoBatchBar.vue';
@@ -124,16 +124,14 @@ onMounted(() => {
 </script>
 
 <template>
-  <AppShell
-    v-if="album"
-    :title="album.name"
-    :back="{ label: '图库', to: '/' }"
-  >
-    <template #titlebar-right>
-      <span class="titlebar-count">{{ photos.length }} 张照片</span>
-    </template>
+  <AppShell v-if="album">
+    <div class="page">
+      <RouterLink class="back-link" to="/">
+        <ArrowLeft :size="16" stroke-width="2" />
+        <span>返回图库</span>
+      </RouterLink>
 
-    <div class="collection-header">
+      <div class="collection-header">
       <div class="collection-cover">
         <AlbumCover :src="album.coverSrc" :alt="`${album.name} 写真集封面`" :icon-size="40" />
       </div>
@@ -284,21 +282,37 @@ onMounted(() => {
         </div>
       </div>
     </Modal>
+  </div>
   </AppShell>
 </template>
 
 <style scoped>
-.titlebar-count {
-  margin-left: auto;
+.page {
+  padding: 16px clamp(20px, 3vw, 32px) 32px;
+}
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 16px;
+  padding: 4px 8px;
+  border-radius: 6px;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: 13px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+.back-link:hover {
+  background: var(--accent);
+  color: var(--foreground);
 }
 
 /* 写真集头部 */
 .collection-header {
   display: flex;
   gap: 32px;
-  padding: 32px clamp(20px, 3vw, 32px);
+  padding: 16px 0 24px;
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
 }
@@ -393,7 +407,7 @@ onMounted(() => {
 
 /* 照片区 */
 .photo-section {
-  padding: 32px clamp(20px, 3vw, 32px);
+  padding: 32px 0;
 }
 .section-title {
   margin: 0 0 20px;

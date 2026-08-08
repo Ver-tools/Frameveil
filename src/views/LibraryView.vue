@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
-import { CirclePlus, Grip, List, SearchX } from 'lucide-vue-next';
+import { CirclePlus, Grip, List, Search, SearchX } from 'lucide-vue-next';
 import AppShell from '../components/AppShell.vue';
 import PhotoGrid from '../components/PhotoGrid.vue';
 import AlbumCover from '../components/AlbumCover.vue';
@@ -60,11 +60,7 @@ function openAlbum(id: string) {
 </script>
 
 <template>
-  <AppShell
-    title="Frameveil"
-    :show-search="true"
-    @search="searchQuery = $event"
-  >
+  <AppShell>
     <div class="page">
       <div class="content-header">
         <div>
@@ -108,6 +104,15 @@ function openAlbum(id: string) {
             <List :size="18" />
           </button>
         </div>
+        <label class="search-field">
+          <Search :size="14" style="color: var(--muted-foreground); flex-shrink: 0" />
+          <input
+            v-model="searchQuery"
+            type="text"
+            placeholder="搜索写真集、照片或标签"
+            aria-label="搜索写真集、照片或标签"
+          />
+        </label>
       </div>
 
       <div v-if="view === 'grid'" class="collection-grid">
@@ -210,6 +215,7 @@ function openAlbum(id: string) {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
   margin-bottom: 24px;
 }
 .view-toggle {
@@ -217,6 +223,35 @@ function openAlbum(id: string) {
   align-items: center;
   gap: 4px;
   margin-left: auto;
+}
+.search-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(260px, 100%);
+  min-width: 180px;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--input);
+  border-radius: 999px;
+  background: var(--background);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.search-field:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 20%, transparent);
+}
+.search-field input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--foreground);
+  font: 500 13px/1 var(--font-sans);
+}
+.search-field input::placeholder {
+  color: var(--muted-foreground);
 }
 .view-toggle button {
   display: inline-flex;

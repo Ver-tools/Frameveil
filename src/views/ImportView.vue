@@ -172,11 +172,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <AppShell title="导入照片">
-    <template #titlebar-right>
-      <button class="titlebar-cancel" type="button" @click="router.push('/')">取消</button>
-    </template>
-
+  <AppShell>
     <div class="page">
       <h1 class="page-title">导入照片</h1>
       <p class="page-sub">将照片导入到你的 Frameveil 图库</p>
