@@ -277,7 +277,10 @@ onMounted(() => {
 <style scoped>
 .page {
   padding: 40px;
-  max-width: 680px;
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  box-sizing: border-box;
 }
 .page-title {
   font-size: 28px;
