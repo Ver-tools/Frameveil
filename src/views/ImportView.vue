@@ -270,7 +270,7 @@ onUnmounted(() => {
 
 <style scoped>
 .page {
-  padding: 40px;
+  padding: 40px clamp(20px, 3.2vw, 40px);
 }
 .page-title {
   font-size: 28px;
@@ -355,6 +355,7 @@ onUnmounted(() => {
   gap: 16px;
   margin-bottom: 16px;
   align-items: center;
+  flex-wrap: wrap;
 }
 .setting-row:last-child {
   margin-bottom: 0;
@@ -499,6 +500,8 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
   margin-top: 32px;
   padding-top: 24px;
   border-top: 1px solid var(--border);

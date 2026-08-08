@@ -168,7 +168,7 @@ function openAlbum(id: string) {
 
 <style scoped>
 .page {
-  padding: 32px;
+  padding: 32px clamp(20px, 3vw, 32px);
 }
 .content-header {
   display: flex;
@@ -245,7 +245,7 @@ function openAlbum(id: string) {
 /* 网格视图 */
 .collection-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
   gap: 20px;
 }
 .collection-card {

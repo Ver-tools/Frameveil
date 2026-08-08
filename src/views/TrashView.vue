@@ -57,7 +57,7 @@ const trashed = computed(() =>
 
 <style scoped>
 .page {
-  padding: 32px;
+  padding: 32px clamp(20px, 3vw, 32px);
 }
 .content-header {
   display: flex;
@@ -122,6 +122,7 @@ const trashed = computed(() =>
   display: flex;
   align-items: center;
   gap: 14px;
+  flex-wrap: wrap;
   padding: 10px 14px;
   background: var(--card);
   border: 1px solid var(--border);

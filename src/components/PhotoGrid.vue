@@ -60,7 +60,7 @@ function onCardClick(photo: Photo, index: number) {
 <style scoped>
 .photo-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr));
   gap: 16px;
 }
 .grid-cell {
@@ -142,11 +142,5 @@ function onCardClick(photo: Photo, index: number) {
 .list-check.checked {
   background: var(--primary);
   border-color: var(--primary);
-}
-
-@media (max-width: 1280px) {
-  .photo-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
 }
 </style>

@@ -411,7 +411,8 @@ const infoRows = computed(() => {
   padding: 32px;
 }
 .viewer-meta {
-  width: 300px;
+  width: min(300px, 30vw);
+  min-width: 240px;
   flex-shrink: 0;
   overflow-y: auto;
   background: var(--card);

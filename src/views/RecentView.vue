@@ -80,7 +80,7 @@ function selectModeActive() {
 
 <style scoped>
 .page {
-  padding: 32px;
+  padding: 32px clamp(20px, 3vw, 32px);
 }
 .content-header {
   display: flex;

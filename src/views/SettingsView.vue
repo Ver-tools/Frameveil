@@ -276,7 +276,7 @@ onMounted(() => {
 
 <style scoped>
 .page {
-  padding: 40px;
+  padding: 40px clamp(20px, 3.2vw, 40px);
   width: 100%;
   max-width: 1180px;
   margin: 0 auto;
@@ -311,6 +311,7 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 24px;
+  flex-wrap: wrap;
   padding: 16px 20px;
   border-bottom: 1px solid var(--border);
 }
@@ -408,7 +409,7 @@ onMounted(() => {
   filter: brightness(0.97);
 }
 .progress-track {
-  width: 200px;
+  width: min(200px, 45vw);
   height: 6px;
   border-radius: 3px;
   background: var(--secondary);

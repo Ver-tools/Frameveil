@@ -298,11 +298,12 @@ onMounted(() => {
 .collection-header {
   display: flex;
   gap: 32px;
-  padding: 32px;
+  padding: 32px clamp(20px, 3vw, 32px);
   border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
 }
 .collection-cover {
-  width: 240px;
+  width: min(240px, 100%);
   height: 180px;
   border-radius: var(--radius);
   border: 1px solid var(--border);
@@ -316,7 +317,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  min-width: 0;
+  min-width: min(100%, 300px);
 }
 .collection-eyebrow {
   color: var(--muted-foreground);
@@ -350,6 +351,7 @@ onMounted(() => {
   gap: 12px;
   margin-top: 20px;
   align-items: center;
+  flex-wrap: wrap;
 }
 .action-btn {
   display: inline-flex;
@@ -391,7 +393,7 @@ onMounted(() => {
 
 /* 照片区 */
 .photo-section {
-  padding: 32px;
+  padding: 32px clamp(20px, 3vw, 32px);
 }
 .section-title {
   margin: 0 0 20px;

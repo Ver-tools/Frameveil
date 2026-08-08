@@ -157,7 +157,10 @@ async function onExport() {
   z-index: 90;
   display: flex;
   align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
   gap: 4px;
+  max-width: calc(100vw - 24px);
   padding: 8px 10px;
   border-radius: 999px;
   background: var(--popover);
