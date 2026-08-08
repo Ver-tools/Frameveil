@@ -1,12 +1,17 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
-import { invoke } from '@tauri-apps/api/core';
-import { ChevronDown, ExternalLink } from 'lucide-vue-next';
+import { ChevronDown, ExternalLink, FolderOpen } from 'lucide-vue-next';
 import AppShell from '../components/AppShell.vue';
 import ToggleSwitch from '../components/ToggleSwitch.vue';
 import SegControl from '../components/SegControl.vue';
 import { library, toast } from '../store/library';
 import { formatBytes } from '../utils/format';
+import {
+  pickStorageLocation,
+  resetStorageLocation,
+  refreshStorageUsed,
+  storageLocationLabel,
+} from '../utils/storage';
 
 const TOTAL_DISK = 256 * 1024 * 1024 * 1024; // 256 GB 参考容量
 
@@ -23,16 +28,24 @@ const viewOptions = [
 const storageUsed = ref(0);
 
 async function refreshStorage() {
-  try {
-    storageUsed.value = await invoke<number>('storage_used');
-  } catch {
-    storageUsed.value = 0;
-  }
+  storageUsed.value = await refreshStorageUsed();
 }
 
 const storagePercent = computed(() =>
   Math.min((storageUsed.value / TOTAL_DISK) * 100, 100)
 );
+
+function hasCustomLocation(): boolean {
+  return Boolean(library.settings.storageLocation);
+}
+
+async function onChangeLocation() {
+  if (await pickStorageLocation()) refreshStorage();
+}
+
+async function onResetLocation() {
+  if (await resetStorageLocation()) refreshStorage();
+}
 
 function clearCache() {
   toast('缓存已清理', 'success');
@@ -78,9 +91,15 @@ onMounted(refreshStorage);
         <div class="section-card">
           <div class="setting-row">
             <span class="row-label">存储位置</span>
-            <div class="chevron-trigger">
-              <span class="truncate">{{ library.settings.storageLocation || '用户/Frameveil/图库' }}</span>
-              <ChevronDown :size="16" />
+            <div class="location-control">
+              <button v-if="hasCustomLocation()" class="pill-btn" type="button" @click="onResetLocation">
+                恢复默认
+              </button>
+              <button class="location-trigger" type="button" title="点击选择新的存储位置" @click="onChangeLocation">
+                <FolderOpen :size="15" />
+                <span class="truncate">{{ storageLocationLabel() }}</span>
+                <ChevronDown :size="16" />
+              </button>
             </div>
           </div>
           <div class="setting-row">
@@ -259,6 +278,42 @@ onMounted(refreshStorage);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.location-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 72%;
+  min-width: 0;
+}
+.location-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  background: var(--secondary);
+  color: var(--foreground);
+  border-radius: 999px;
+  height: 32px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: background-color 0.18s ease, border-color 0.18s ease;
+}
+.location-trigger:hover {
+  background: var(--sidebar-accent);
+  border-color: var(--primary);
+}
+.location-trigger svg {
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+}
+.location-trigger .truncate {
+  flex: 1;
+  min-width: 0;
 }
 .pill-btn {
   display: inline-flex;

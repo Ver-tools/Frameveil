@@ -9,6 +9,7 @@ import AppShell from '../components/AppShell.vue';
 import ToggleSwitch from '../components/ToggleSwitch.vue';
 import { library, runImport, loadImageSize, toast } from '../store/library';
 import { formatBytes } from '../utils/format';
+import { pickStorageLocation, storageLocationLabel } from '../utils/storage';
 import type { PendingFile } from '../types';
 
 const router = useRouter();
@@ -17,11 +18,13 @@ const albumName = ref('');
 const tagsInput = ref('');
 const autoOrganize = ref(true);
 const smartAlbum = ref(false);
-const storageLabel = ref('默认位置 › 用户/Frameveil/图库');
 
 const pending = ref<PendingFile[]>([]);
 const importing = ref(false);
 const dragging = ref(false);
+
+/** 存储位置显示文案 */
+const storageLabel = computed(() => `默认位置 › ${storageLocationLabel()}`);
 
 const IMAGE_EXTS = [
   'jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'tif', 'tiff', 'bmp',
@@ -126,14 +129,14 @@ async function doImport() {
 /* ── 拖放 ── */
 let unlisten: (() => void) | undefined;
 onMounted(async () => {
-  try {
-    const libDir = await invoke<string>('library_dir');
-    if (libDir) {
-      storageLabel.value = `默认位置 › ${libDir}`;
-      if (!library.settings.storageLocation) library.settings.storageLocation = libDir;
+  // 尚未设置存储位置时，初始化为默认图库目录
+  if (!library.settings.storageLocation) {
+    try {
+      const libDir = await invoke<string>('library_dir');
+      if (libDir) library.settings.storageLocation = libDir;
+    } catch {
+      /* 桌面环境下失败则保留默认文案 */
     }
-  } catch {
-    /* 桌面环境下失败则保留默认文案 */
   }
   try {
     unlisten = await getCurrentWebview().onDragDropEvent((event) => {
@@ -193,7 +196,7 @@ onUnmounted(() => {
 
         <div class="setting-row">
           <span class="row-label">存储位置</span>
-          <div class="storage-select">
+          <div class="storage-select" title="点击选择存储位置" @click="pickStorageLocation()">
             <span class="storage-text">{{ storageLabel }}</span>
             <ChevronDown :size="16" style="color: var(--muted-foreground); flex-shrink: 0" />
           </div>

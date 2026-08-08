@@ -41,7 +41,47 @@ fn get_file_infos(paths: Vec<String>) -> Result<Vec<FileInfo>, String> {
     Ok(out)
 }
 
-/// 将源照片文件复制到目标目录（导入 / 导出磁盘文件时使用），返回复制后的新路径列表
+/// 校验并确保目录存在且可写（选择存储位置时使用），返回规范化路径
+#[tauri::command]
+fn ensure_dir(path: String) -> Result<String, String> {
+    let dir = PathBuf::from(&path);
+    fs::create_dir_all(&dir).map_err(|e| format!("无法创建目录：{e}"))?;
+    // 写入探针文件验证可写性
+    let probe = dir.join(".frameveil_write_probe");
+    fs::write(&probe, b"ok").map_err(|e| format!("目录不可写：{e}"))?;
+    let _ = fs::remove_file(&probe);
+    Ok(dir.to_string_lossy().to_string())
+}
+
+/// 生成不冲突的目标文件路径：同名文件自动追加 (1)、(2)…
+fn unique_target(dest: &Path, file_name: &str) -> PathBuf {
+    let target = dest.join(file_name);
+    if !target.exists() {
+        return target;
+    }
+    let stem = Path::new(file_name)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "file".to_string());
+    let ext = Path::new(file_name)
+        .extension()
+        .map(|e| e.to_string_lossy().to_string());
+    let mut i = 1;
+    loop {
+        let candidate = match &ext {
+            Some(e) => format!("{stem} ({i}).{e}"),
+            None => format!("{stem} ({i})"),
+        };
+        let p = dest.join(&candidate);
+        if !p.exists() {
+            return p;
+        }
+        i += 1;
+    }
+}
+
+/// 将源照片文件复制到目标目录（导入 / 导出磁盘文件时使用），返回复制后的新路径列表。
+/// 自动创建目标目录，并对同名文件做重命名处理，避免覆盖已有照片。
 #[tauri::command]
 fn copy_photos(sources: Vec<String>, dest_dir: String) -> Result<Vec<String>, String> {
     let dest = PathBuf::from(&dest_dir);
@@ -56,14 +96,14 @@ fn copy_photos(sources: Vec<String>, dest_dir: String) -> Result<Vec<String>, St
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .ok_or("无效的文件名")?;
-        let target = dest.join(&file_name);
+        let target = unique_target(&dest, &file_name);
         fs::copy(path, &target).map_err(|e| e.to_string())?;
         copied.push(target.to_string_lossy().to_string());
     }
     Ok(copied)
 }
 
-/// 将 base64 编码的图片数据写入目标目录（导出内置示例照片时使用）
+/// 将 base64 编码的图片数据写入目标目录（导出内置示例照片时使用），同名文件自动重命名
 #[tauri::command]
 fn write_photo(dest_dir: String, file_name: String, data: String) -> Result<String, String> {
     let dest = PathBuf::from(&dest_dir);
@@ -71,7 +111,7 @@ fn write_photo(dest_dir: String, file_name: String, data: String) -> Result<Stri
     let bytes = BASE64
         .decode(data.as_bytes())
         .map_err(|e| format!("解码失败: {e}"))?;
-    let target = dest.join(&file_name);
+    let target = unique_target(&dest, &file_name);
     fs::write(&target, bytes).map_err(|e| e.to_string())?;
     Ok(target.to_string_lossy().to_string())
 }
@@ -97,12 +137,18 @@ fn library_dir(app: tauri::AppHandle) -> Result<String, String> {
     Ok(lib.to_string_lossy().to_string())
 }
 
-/// 统计图库目录已占用的磁盘空间（字节）
+/// 统计指定目录（未指定时统计默认图库目录）已占用的磁盘空间（字节）
 #[tauri::command]
-fn storage_used(app: tauri::AppHandle) -> Result<u64, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let lib = dir.join("Library");
-    if !lib.exists() {
+fn storage_used(app: tauri::AppHandle, path: Option<String>) -> Result<u64, String> {
+    let dir = match path {
+        Some(p) => PathBuf::from(p),
+        None => app
+            .path()
+            .app_data_dir()
+            .map_err(|e| e.to_string())?
+            .join("Library"),
+    };
+    if !dir.exists() {
         return Ok(0);
     }
     let mut total: u64 = 0;
@@ -118,7 +164,7 @@ fn storage_used(app: tauri::AppHandle) -> Result<u64, String> {
         }
         Ok(())
     }
-    walk(&lib, &mut total).map_err(|e| e.to_string())?;
+    walk(&dir, &mut total).map_err(|e| e.to_string())?;
     Ok(total)
 }
 
@@ -133,6 +179,7 @@ pub fn run() {
             write_photo,
             delete_photos,
             library_dir,
+            ensure_dir,
             storage_used
         ])
         .run(tauri::generate_context!())
