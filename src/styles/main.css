@@ -1,0 +1,377 @@
+/* ===== Frameveil 全局样式（复刻 UI 设计文件基础布局与通用组件） ===== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  letter-spacing: var(--tracking-normal);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+}
+
+#app {
+  height: 100vh;
+}
+
+button {
+  font-family: var(--font-sans);
+}
+
+input,
+textarea {
+  font-family: var(--font-sans);
+}
+
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* 细滚动条 */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--muted-foreground) 32%, transparent);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--muted-foreground) 52%, transparent);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ── 输入框（.field 容器 + .control 输入） ── */
+.field {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+  min-width: 240px;
+  height: 44px;
+  padding: 0 calc(var(--spacing) * 3);
+  border: 1px solid var(--input);
+  border-radius: var(--radius);
+  background: var(--background);
+  color: var(--foreground);
+  box-shadow: var(--shadow-xs);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.field:focus-within {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 1px var(--ring);
+}
+.field .control {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.field .control::placeholder {
+  color: var(--muted-foreground);
+}
+
+/* ── 按钮 ── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--spacing) * 1.5);
+  height: 40px;
+  padding: 0 20px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--foreground);
+  font: 600 14px/1 var(--font-sans);
+  white-space: nowrap;
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: background-color 0.18s ease, color 0.18s ease, opacity 0.18s ease, filter 0.18s ease;
+}
+.btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+.btn-primary {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+.btn-primary:hover:not(:disabled) {
+  filter: brightness(0.96);
+}
+.btn-secondary {
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+}
+.btn-secondary:hover:not(:disabled) {
+  background: var(--muted);
+}
+.btn-text {
+  box-shadow: none;
+  height: 48px;
+  padding: 0 4px;
+}
+.btn-text:hover:not(:disabled) {
+  color: var(--primary);
+}
+
+/* ── 开关 ── */
+.toggle {
+  width: 40px;
+  height: 24px;
+  border-radius: 999px;
+  position: relative;
+  cursor: pointer;
+  flex-shrink: 0;
+  border: none;
+  transition: background-color 0.18s ease;
+}
+.toggle.on {
+  background: var(--primary);
+}
+.toggle.off {
+  background: var(--secondary);
+  border: 1px solid var(--border);
+}
+.toggle-knob {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--primary-foreground);
+  position: absolute;
+  top: 2px;
+  box-shadow: var(--shadow-sm);
+  transition: left 0.18s ease;
+}
+.toggle.on .toggle-knob {
+  left: 18px;
+}
+.toggle.off .toggle-knob {
+  left: 2px;
+}
+
+/* ── 分段控件 ── */
+.seg-control {
+  display: inline-flex;
+  background: var(--secondary);
+  border-radius: 6px;
+  padding: 2px;
+}
+.seg-item {
+  padding: 4px 12px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: var(--font-sans);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+.seg-item.active {
+  background: var(--background);
+  color: var(--foreground);
+  box-shadow: var(--shadow-sm);
+}
+.seg-item:not(.active):hover {
+  color: var(--foreground);
+}
+
+/* ── 筛选胶囊 ── */
+.filter-chip {
+  padding: 6px 16px;
+  border: none;
+  border-radius: 999px;
+  font: 500 12px/1 var(--font-sans);
+  cursor: pointer;
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+.filter-chip.active {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-weight: 600;
+  cursor: default;
+}
+.filter-chip.inactive {
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+}
+.filter-chip.inactive:hover {
+  background: var(--muted);
+}
+
+/* ── 标签胶囊 ── */
+.tag-chip {
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+}
+
+/* ── 模态弹窗 ── */
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 24px;
+}
+.modal-panel {
+  width: 100%;
+  max-width: 460px;
+  max-height: 85vh;
+  overflow-y: auto;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2xl);
+  padding: 28px;
+}
+.modal-title {
+  margin: 0 0 4px;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--foreground);
+}
+.modal-subtitle {
+  margin: 0 0 24px;
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
+.modal-field-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--foreground);
+  margin-bottom: 8px;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 28px;
+}
+
+/* ── Toast ── */
+.toast-wrap {
+  position: fixed;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+.toast-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-radius: 999px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+  font-size: 13px;
+  animation: toast-in 0.24s ease;
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── 空状态 ── */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 72px 24px;
+  text-align: center;
+  color: var(--muted-foreground);
+}
+.empty-state .empty-icon {
+  width: 48px;
+  height: 48px;
+  color: var(--muted-foreground);
+  opacity: 0.7;
+  margin-bottom: 16px;
+}
+.empty-state .empty-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--foreground);
+  margin: 0 0 6px;
+}
+.empty-state .empty-desc {
+  font-size: 13px;
+  margin: 0;
+}
+
+/* ── 过渡动画 ── */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.18s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
