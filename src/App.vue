@@ -33,9 +33,19 @@ onMounted(() => {
   // 跟随系统时同步初始状态
   applyTheme(library.settings.theme);
 
-  // Esc 退出照片选择模式
+  // 全局快捷键
   window.addEventListener('keydown', (e) => {
+    // Esc 退出照片选择模式
     if (e.key === 'Escape') setSelectMode(false);
+    // Ctrl/Cmd+F 聚焦图库搜索框
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+      const input = document.querySelector<HTMLInputElement>('.search-field input');
+      if (input) {
+        e.preventDefault();
+        input.focus();
+        input.select();
+      }
+    }
   });
 });
 </script>

@@ -10,6 +10,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ArrowLeft,
+  Image as ImageIcon,
 } from 'lucide-vue-next';
 import Modal from '../components/Modal.vue';
 import {
@@ -19,6 +20,7 @@ import {
   toggleFavorite,
   trashPhoto,
   updatePhoto,
+  setAlbumCover,
   toast,
 } from '../store/library';
 import { formatBytes, formatDate } from '../utils/format';
@@ -60,9 +62,13 @@ const backTarget = computed(() => {
 
 const centerLabel = computed(() => backTarget.value.label || '照片');
 
+/** 当前照片所属写真集（用于设为封面） */
+const albumCtx = computed(() => String(ctx.value?.albumId || route.query.album || ''));
+
 function goto(i: number) {
   const next = photos.value[i];
   if (!next) return;
+  resetZoom();
   library.viewerContext = {
     photos: ctx.value?.photos ?? photos.value.map((p) => ({ ...p })),
     index: i,
@@ -95,6 +101,53 @@ async function share() {
     }
   } else {
     toast('内置示例照片，可在导出后查看', 'info');
+  }
+}
+
+/* ── 设为写真集封面 ── */
+function onSetCover() {
+  const p = photo.value;
+  if (!p || !albumCtx.value) return;
+  setAlbumCover(albumCtx.value, p.src);
+}
+
+/* ── 缩放 ── */
+const imageWrap = ref<HTMLElement | null>(null);
+const fit = ref(true);
+const zoom = ref(1);
+
+const imageStyle = computed(() =>
+  fit.value ? {} : { transform: `scale(${zoom.value})`, transition: 'transform 0.15s ease' }
+);
+
+function clamp(v: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, v));
+}
+
+function resetZoom() {
+  fit.value = true;
+  zoom.value = 1;
+}
+
+function zoomBy(delta: number) {
+  const base = fit.value ? 1 : zoom.value;
+  const next = clamp(base + delta, 0.25, 4);
+  fit.value = next === 1;
+  zoom.value = next === 1 ? 1 : next;
+}
+
+function onWheel(e: WheelEvent) {
+  if (!photo.value) return;
+  e.preventDefault();
+  zoomBy(e.deltaY < 0 ? 0.1 : -0.1);
+}
+
+function onDblClick() {
+  if (fit.value) {
+    fit.value = false;
+    zoom.value = 2;
+  } else {
+    resetZoom();
   }
 }
 
@@ -144,10 +197,19 @@ function onKeydown(e: KeyboardEvent) {
   if (e.key === 'ArrowLeft') prev();
   else if (e.key === 'ArrowRight') next();
   else if (e.key === 'Escape') goBack();
+  else if (e.key === '+' || e.key === '=') zoomBy(0.2);
+  else if (e.key === '-') zoomBy(-0.2);
+  else if (e.key === '0') resetZoom();
 }
 
-onMounted(() => window.addEventListener('keydown', onKeydown));
-onUnmounted(() => window.removeEventListener('keydown', onKeydown));
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown);
+  imageWrap.value?.addEventListener('wheel', onWheel, { passive: false });
+});
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKeydown);
+  imageWrap.value?.removeEventListener('wheel', onWheel);
+});
 
 const infoRows = computed(() => {
   const p = photo.value;
@@ -189,6 +251,15 @@ const infoRows = computed(() => {
         <button class="tb-icon" aria-label="编辑" title="编辑" @click="openEdit">
           <PenLine :size="18" />
         </button>
+        <button
+          v-if="albumCtx"
+          class="tb-icon"
+          aria-label="设为封面"
+          title="设为写真集封面"
+          @click="onSetCover"
+        >
+          <ImageIcon :size="18" />
+        </button>
         <button class="tb-icon" aria-label="分享" title="分享" @click="share">
           <Share2 :size="18" />
         </button>
@@ -207,10 +278,18 @@ const infoRows = computed(() => {
       </div>
 
       <div class="viewer-center">
-        <div class="viewer-image-wrap">
-          <img class="viewer-image" :src="photo.src" :alt="photo.name" />
+        <div
+          class="viewer-image-wrap"
+          ref="imageWrap"
+          :title="fit ? '滚轮缩放 · 双击放大 · 按 0 复位' : `缩放 ${Math.round(zoom * 100)}%，双击复位`"
+          @dblclick="onDblClick"
+        >
+          <img class="viewer-image" :src="photo.src" :alt="photo.name" :style="imageStyle" />
         </div>
-        <div class="viewer-counter">{{ index + 1 }} / {{ photos.length }}</div>
+        <div class="viewer-counter">
+          <span v-if="!fit" class="zoom-badge">{{ Math.round(zoom * 100) }}%</span>
+          <span>{{ index + 1 }} / {{ photos.length }}</span>
+        </div>
       </div>
 
       <div class="viewer-nav">
@@ -474,6 +553,15 @@ const infoRows = computed(() => {
   text-align: center;
   font-family: var(--font-mono);
   flex-shrink: 0;
+}
+.zoom-badge {
+  display: inline-block;
+  margin-right: 10px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--secondary);
+  color: var(--foreground);
+  font-size: 11px;
 }
 
 /* 元数据面板 */

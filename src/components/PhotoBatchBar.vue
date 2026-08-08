@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { open } from '@tauri-apps/plugin-dialog';
-import { Heart, Trash2, Download, CheckSquare, X } from 'lucide-vue-next';
+import { Heart, Trash2, Download, CheckSquare, X, Tag } from 'lucide-vue-next';
 import Modal from './Modal.vue';
 import {
   selection,
@@ -9,6 +9,7 @@ import {
   selectAllIds,
   favoritePhotos,
   trashPhotos,
+  addTagsToPhotos,
   toast,
 } from '../store/library';
 import { exportPhotosToDir } from '../utils/exportPhotos';
@@ -41,6 +42,24 @@ function onDelete() {
 
 function exit() {
   setSelectMode(false);
+}
+
+/* ── 批量添加标签 ── */
+const tagOpen = ref(false);
+const tagInput = ref('');
+
+function openTagModal() {
+  tagInput.value = '';
+  tagOpen.value = true;
+}
+
+function applyTags() {
+  const tags = tagInput.value
+    .split(/[,，]/)
+    .map((t) => t.trim())
+    .filter(Boolean);
+  addTagsToPhotos(selection.ids, tags);
+  tagOpen.value = false;
 }
 
 /* ── 批量导出 ── */
@@ -86,6 +105,10 @@ async function onExport() {
       <Heart :size="16" />
       <span>收藏</span>
     </button>
+    <button class="batch-btn" type="button" @click="openTagModal">
+      <Tag :size="16" />
+      <span>标签</span>
+    </button>
     <button class="batch-btn" type="button" @click="onDelete">
       <Trash2 :size="16" style="color: var(--state-error)" />
       <span>删除</span>
@@ -99,6 +122,20 @@ async function onExport() {
       <span>取消</span>
     </button>
   </div>
+
+  <!-- 批量添加标签 -->
+  <Modal v-if="tagOpen" title="批量添加标签" :subtitle="`将标签添加到选中的 ${count} 张照片`" @close="tagOpen = false">
+    <div class="tag-form">
+      <label class="modal-field-label" for="batch-tags">标签</label>
+      <div class="field">
+        <input id="batch-tags" class="control" v-model="tagInput" placeholder="用逗号分隔多个标签" />
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" type="button" @click="tagOpen = false">取消</button>
+        <button class="btn btn-primary" type="button" @click="applyTags">添加</button>
+      </div>
+    </div>
+  </Modal>
 
   <!-- 批量导出进度 -->
   <Modal v-if="exporting" title="正在导出" subtitle="正在将选中的照片导出到所选位置…">

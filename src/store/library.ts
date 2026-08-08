@@ -106,9 +106,45 @@ watch(
         /* 存储空间不足时忽略 */
       }
     }, 200);
+
+    // 开启自动备份时，在本地变更稳定后写入备份文件
+    if (library.settings.autoBackup && library.settings.lastBackupAt !== lastBackupWritten) {
+      window.clearTimeout(backupTimer);
+      backupTimer = window.setTimeout(performBackup, 1500);
+    }
   },
   { deep: true }
 );
+
+/* ── 自动备份 ───────────────────────────────────────────── */
+let lastBackupWritten = 0;
+let backupTimer: number | undefined;
+
+async function performBackup() {
+  try {
+    const dir = await invoke<string>('backup_dir');
+    const data = JSON.stringify({
+      albums: library.albums,
+      photos: library.photos,
+      settings: library.settings,
+      backedAt: Date.now(),
+    });
+    await invoke('write_text_file', {
+      path: `${dir.replace(/[\\/]$/, '')}/library-backup.json`,
+      content: data,
+    });
+    lastBackupWritten = Date.now();
+    library.settings.lastBackupAt = lastBackupWritten;
+  } catch {
+    /* 备份失败静默处理，避免打扰用户 */
+  }
+}
+
+/** 立即执行一次备份，返回是否成功 */
+export async function backupNow(): Promise<boolean> {
+  await performBackup();
+  return library.settings.lastBackupAt === lastBackupWritten;
+}
 
 /* ── 提示 ───────────────────────────────────────────────── */
 let toastSeq = 0;
@@ -213,7 +249,7 @@ export function favoritePhotos(ids: Iterable<string>, value = true) {
       n += 1;
     }
   }
-  toast(value ? `已收藏 ${n} 张照片` : `已取消收藏 ${n} 张照片`, 'success');
+  if (n) toast(value ? `已收藏 ${n} 张照片` : `已取消收藏 ${n} 张照片`, 'success');
 }
 
 /** 批量移入回收站 */
@@ -228,6 +264,34 @@ export function trashPhotos(ids: Iterable<string>) {
     }
   }
   if (n) toast(`已将 ${n} 张照片移入回收站`, 'info');
+}
+
+/** 批量添加标签（去重） */
+export function addTagsToPhotos(ids: Iterable<string>, tags: string[]) {
+  const clean = Array.from(new Set(tags.map((t) => t.trim()).filter(Boolean)));
+  if (!clean.length) return;
+  let n = 0;
+  for (const id of ids) {
+    const p = photoById(id);
+    if (p && !p.inTrash) {
+      p.tags = Array.from(new Set([...p.tags, ...clean]));
+      n += 1;
+    }
+  }
+  toast(`已为 ${n} 张照片添加标签`, 'success');
+}
+
+/** 恢复回收站中的所有照片 */
+export function restoreAllTrash() {
+  let n = 0;
+  library.photos.forEach((p) => {
+    if (p.inTrash) {
+      p.inTrash = false;
+      p.trashedAt = undefined;
+      n += 1;
+    }
+  });
+  if (n) toast(`已恢复 ${n} 张照片`, 'success');
 }
 
 export function restorePhoto(id: string) {
@@ -275,6 +339,14 @@ export function updateAlbum(id: string, patch: Partial<Album>) {
   if (a) Object.assign(a, patch);
 }
 
+/** 将某张照片设为写真集封面 */
+export function setAlbumCover(albumId: string, photoSrc: string) {
+  const a = albumById(albumId);
+  if (!a) return;
+  a.coverSrc = photoSrc;
+  toast('已设为写真集封面', 'success');
+}
+
 /* ── 图片查看器 ─────────────────────────────────────────── */
 export function openViewer(
   photos: Photo[],
@@ -320,10 +392,13 @@ function duplicatePolicy(): string {
 /**
  * 执行导入：
  * 1. 获取存储位置（不存在则创建）
- * 2. 通过 Rust 命令把文件复制到 <存储位置>/<写真集>/（自动整理关闭时直接复制到根目录）
- * 3. 建立写真集与照片记录
+ * 2. 逐文件通过 Rust 命令复制到 <存储位置>/<写真集>/（自动整理关闭时直接复制到根目录）
+ * 3. 建立写真集与照片记录；onProgress 回调 (已完成, 总数) 用于展示导入进度
  */
-export async function runImport(payload: ImportPayload): Promise<Album | undefined> {
+export async function runImport(
+  payload: ImportPayload,
+  onProgress?: (done: number, total: number) => void
+): Promise<Album | undefined> {
   if (!payload.files.length) return undefined;
   let libDir = library.settings.storageLocation;
   try {
@@ -337,17 +412,26 @@ export async function runImport(payload: ImportPayload): Promise<Album | undefin
   const sanitized = sanitizeDirName(payload.albumName);
   const root = libDir.replace(/[\\/]$/, '');
   const destDir = payload.autoOrganize === false ? root : `${root}/${sanitized}`;
+  const onDuplicate = duplicatePolicy();
 
-  let newPaths: string[] = [];
-  try {
-    newPaths = await invoke<string[]>('copy_photos', {
-      sources: payload.files.map((f) => f.path),
-      destDir,
-      onDuplicate: duplicatePolicy(),
-    });
-  } catch (e) {
-    toast(`导入失败：${String(e)}`, 'error');
-    return undefined;
+  // 逐文件复制，便于展示进度并隔离单个文件失败
+  const newPaths: string[] = [];
+  let failed = 0;
+  for (let i = 0; i < payload.files.length; i++) {
+    const f = payload.files[i];
+    let copiedPath = f.path;
+    try {
+      const res = await invoke<string[]>('copy_photos', {
+        sources: [f.path],
+        destDir,
+        onDuplicate,
+      });
+      copiedPath = res[0] ?? f.path;
+    } catch {
+      failed += 1;
+    }
+    newPaths.push(copiedPath);
+    onProgress?.(i + 1, payload.files.length);
   }
 
   // 建立/复用写真集
@@ -427,6 +511,10 @@ export async function runImport(payload: ImportPayload): Promise<Album | undefin
   }
 
   library.photos.push(...newPhotos);
-  toast(`已导入 ${newPhotos.length} 张照片`, 'success');
+  if (failed > 0) {
+    toast(`已导入 ${newPhotos.length - failed} 张照片，${failed} 个文件失败`, 'info');
+  } else {
+    toast(`已导入 ${newPhotos.length} 张照片`, 'success');
+  }
   return album;
 }

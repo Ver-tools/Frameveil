@@ -5,7 +5,7 @@ import AppShell from '../components/AppShell.vue';
 import ToggleSwitch from '../components/ToggleSwitch.vue';
 import SegControl from '../components/SegControl.vue';
 import Modal from '../components/Modal.vue';
-import { library, toast } from '../store/library';
+import { library, toast, backupNow } from '../store/library';
 import { formatBytes } from '../utils/format';
 import { getCacheSize, clearAppCache } from '../utils/cache';
 import {
@@ -64,6 +64,20 @@ async function onClearCache() {
 
 function checkUpdate() {
   toast('当前已是最新版本', 'success');
+}
+
+/* ── 自动备份 ── */
+const lastBackupLabel = computed(() => {
+  const t = library.settings.lastBackupAt;
+  if (!t) return '从未备份';
+  const d = new Date(t);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+});
+
+async function onBackupNow() {
+  const ok = await backupNow();
+  toast(ok ? '备份已完成' : '备份失败，请检查存储位置', ok ? 'success' : 'error');
 }
 
 /* ── 协议 / 隐私政策弹窗 ── */
@@ -158,8 +172,14 @@ onMounted(() => {
             <button class="pill-btn" type="button" @click="onClearCache">清理</button>
           </div>
           <div class="setting-row">
-            <span class="row-label">自动备份</span>
-            <ToggleSwitch v-model="library.settings.autoBackup" label="自动备份" />
+            <div>
+              <div class="row-label">自动备份</div>
+              <div class="row-desc">上次备份：{{ lastBackupLabel }}</div>
+            </div>
+            <div class="backup-control">
+              <button class="pill-btn" type="button" @click="onBackupNow">立即备份</button>
+              <ToggleSwitch v-model="library.settings.autoBackup" label="自动备份" />
+            </div>
           </div>
         </div>
       </section>
@@ -419,5 +439,11 @@ onMounted(() => {
   line-height: 1.7;
   color: var(--muted-foreground);
   white-space: pre-line;
+}
+.backup-control {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
 }
 </style>

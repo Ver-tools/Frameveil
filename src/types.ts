@@ -68,6 +68,8 @@ export interface Settings {
   faceRecognition: boolean;
   locationInfo: boolean;
   analytics: boolean;
+  /** 上次自动备份时间戳 */
+  lastBackupAt?: number;
 }
 
 /** 导入预览中的待导入文件 */

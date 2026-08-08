@@ -7,6 +7,7 @@ import AppShell from '../components/AppShell.vue';
 import PhotoGrid from '../components/PhotoGrid.vue';
 import PhotoBatchBar from '../components/PhotoBatchBar.vue';
 import ToggleSwitch from '../components/ToggleSwitch.vue';
+import AlbumCover from '../components/AlbumCover.vue';
 import Modal from '../components/Modal.vue';
 import {
   albumById,
@@ -133,7 +134,9 @@ onMounted(() => {
     </template>
 
     <div class="collection-header">
-      <img class="collection-cover" :src="album.coverSrc" :alt="`${album.name} 写真集封面`" />
+      <div class="collection-cover">
+        <AlbumCover :src="album.coverSrc" :alt="`${album.name} 写真集封面`" :icon-size="40" />
+      </div>
       <div class="collection-info">
         <span class="collection-eyebrow">
           写真集
@@ -301,10 +304,11 @@ onMounted(() => {
 .collection-cover {
   width: 240px;
   height: 180px;
-  object-fit: cover;
   border-radius: var(--radius);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-md);
+  overflow: hidden;
+  background: var(--secondary);
   flex-shrink: 0;
 }
 .collection-info {

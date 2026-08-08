@@ -21,6 +21,7 @@ const smartAlbum = ref(library.settings.smartAlbum);
 
 const pending = ref<PendingFile[]>([]);
 const importing = ref(false);
+const importProgress = ref(0);
 const dragging = ref(false);
 
 /** 移除一个待导入文件 */
@@ -112,19 +113,25 @@ async function doImport() {
     return;
   }
   importing.value = true;
+  importProgress.value = 0;
   try {
     const name = albumName.value.trim() || `写真集 ${new Date().toISOString().slice(0, 10)}`;
     const tags = tagsInput.value
       .split(/[,，]/)
       .map((t) => t.trim())
       .filter(Boolean);
-    const album = await runImport({
-      files: pending.value,
-      albumName: name,
-      tags,
-      smartAlbum: smartAlbum.value,
-      autoOrganize: autoOrganize.value,
-    });
+    const album = await runImport(
+      {
+        files: pending.value,
+        albumName: name,
+        tags,
+        smartAlbum: smartAlbum.value,
+        autoOrganize: autoOrganize.value,
+      },
+      (done) => {
+        importProgress.value = done;
+      }
+    );
     if (album) {
       router.push(`/album/${album.id}`);
     }
@@ -253,7 +260,7 @@ onUnmounted(() => {
         <div class="bottom-actions">
           <button class="cancel-btn" type="button" @click="router.push('/')">取消</button>
           <button class="import-btn" type="button" :disabled="importing || !pending.length" @click="doImport">
-            {{ importing ? '导入中…' : '导入' }}
+            {{ importing ? `导入中 ${importProgress}/${pending.length}…` : '导入' }}
           </button>
         </div>
       </div>

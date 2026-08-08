@@ -4,6 +4,7 @@ import AppShell from '../components/AppShell.vue';
 import {
   library,
   restorePhoto,
+  restoreAllTrash,
   permanentDeletePhoto,
   emptyTrash,
 } from '../store/library';
@@ -22,14 +23,14 @@ const trashed = computed(() =>
           <h1 class="page-title">回收站</h1>
           <p class="subtitle">{{ trashed.length }} 张照片</p>
         </div>
-        <button
-          v-if="trashed.length"
-          class="empty-trash-btn"
-          type="button"
-          @click="emptyTrash"
-        >
-          清空回收站
-        </button>
+        <div v-if="trashed.length" class="header-actions">
+          <button class="restore-all-btn" type="button" @click="restoreAllTrash">
+            全部恢复
+          </button>
+          <button class="empty-trash-btn" type="button" @click="emptyTrash">
+            清空回收站
+          </button>
+        </div>
       </div>
 
       <div v-if="trashed.length" class="trash-list">
@@ -91,6 +92,26 @@ const trashed = computed(() =>
 }
 .empty-trash-btn:hover {
   background: var(--state-error-surface);
+}
+.header-actions {
+  display: flex;
+  gap: 10px;
+}
+.restore-all-btn {
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  border: none;
+  border-radius: 999px;
+  height: 32px;
+  padding: 0 16px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: background-color 0.18s ease;
+}
+.restore-all-btn:hover {
+  background: var(--muted);
 }
 .trash-list {
   display: flex;

@@ -225,6 +225,20 @@ fn clear_cache(app: tauri::AppHandle) -> Result<u64, String> {
     Ok(cleared)
 }
 
+/// 返回（并创建）自动备份目录
+#[tauri::command]
+fn backup_dir(app: tauri::AppHandle) -> Result<String, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("Backups");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.to_string_lossy().to_string())
+}
+
+/// 将文本内容写入指定文件（自动备份图库元数据时使用）
+#[tauri::command]
+fn write_text_file(path: String, content: String) -> Result<(), String> {
+    fs::write(&path, content).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -240,7 +254,9 @@ pub fn run() {
             storage_used,
             cache_dir,
             cache_size,
-            clear_cache
+            clear_cache,
+            backup_dir,
+            write_text_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router';
 import { CirclePlus, Grip, List, SearchX } from 'lucide-vue-next';
 import AppShell from '../components/AppShell.vue';
 import PhotoGrid from '../components/PhotoGrid.vue';
+import AlbumCover from '../components/AlbumCover.vue';
 import { albumsWithCounts, library } from '../store/library';
 
 const router = useRouter();
@@ -117,7 +118,9 @@ function openAlbum(id: string) {
           style="cursor: pointer"
           @click="openAlbum(album.id)"
         >
-          <img class="cover" :src="album.coverSrc" :alt="album.name" loading="lazy" />
+          <div class="cover">
+            <AlbumCover :src="album.coverSrc" :alt="album.name" />
+          </div>
           <div class="card-body">
             <h3 class="collection-title">{{ album.name }}</h3>
             <p class="collection-meta">{{ album.photoCount }}张 · {{ album.period }}</p>
@@ -132,7 +135,9 @@ function openAlbum(id: string) {
           class="album-row"
           @click="openAlbum(album.id)"
         >
-          <img class="album-thumb" :src="album.coverSrc" :alt="album.name" loading="lazy" />
+          <div class="album-thumb">
+            <AlbumCover :src="album.coverSrc" :alt="album.name" :icon-size="22" />
+          </div>
           <div class="album-info">
             <span class="album-name">{{ album.name }}</span>
             <span class="album-desc">{{ album.description }}</span>
@@ -251,10 +256,11 @@ function openAlbum(id: string) {
 .collection-card .cover {
   width: 100%;
   aspect-ratio: 4 / 3;
-  object-fit: cover;
   display: block;
   border-radius: calc(var(--radius) - 4px);
   border: 1px solid var(--border);
+  overflow: hidden;
+  background: var(--secondary);
   transition: border-color 0.2s ease;
 }
 .collection-card .card-body {
@@ -303,9 +309,10 @@ function openAlbum(id: string) {
 .album-thumb {
   width: 88px;
   height: 66px;
-  object-fit: cover;
   border-radius: calc(var(--radius) - 6px);
   border: 1px solid var(--border);
+  overflow: hidden;
+  background: var(--secondary);
   flex-shrink: 0;
 }
 .album-info {
