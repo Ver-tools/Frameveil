@@ -27,13 +27,20 @@ const allSelected = computed(
 /** 当前可见照片中已选中的照片 */
 const selectedPhotos = computed(() => props.photos.filter((p) => selection.ids.has(p.id)));
 
+/** 选中照片是否已全部收藏（用于切换收藏按钮文案） */
+const allFavorited = computed(
+  () =>
+    selectedPhotos.value.length > 0 &&
+    selectedPhotos.value.every((p) => p.isFavorite)
+);
+
 function toggleAll() {
   if (allSelected.value) selectAllIds([]);
   else selectAllIds(props.photos.map((p) => p.id));
 }
 
 function onFavorite() {
-  favoritePhotos(selection.ids, true);
+  favoritePhotos(selection.ids, !allFavorited.value);
 }
 
 function onDelete() {
@@ -133,8 +140,8 @@ function applyMove() {
       <span>{{ allSelected ? '取消全选' : '全选' }}</span>
     </button>
     <button class="batch-btn" type="button" @click="onFavorite">
-      <Heart :size="16" />
-      <span>收藏</span>
+      <Heart :size="16" :fill="allFavorited ? 'currentColor' : 'none'" />
+      <span>{{ allFavorited ? '取消收藏' : '收藏' }}</span>
     </button>
     <button class="batch-btn" type="button" @click="openTagModal">
       <Tag :size="16" />

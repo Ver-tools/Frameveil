@@ -150,6 +150,23 @@ fn delete_photos(paths: Vec<String>) -> Result<(), String> {
     Ok(())
 }
 
+/// 重命名磁盘上的照片文件（保持同目录），返回新路径。
+/// 目标文件名已存在时直接报错，由前端处理冲突策略。
+#[tauri::command]
+fn rename_photo(from: String, new_name: String) -> Result<String, String> {
+    let path = Path::new(&from);
+    if !path.exists() {
+        return Err("源文件不存在".to_string());
+    }
+    let dir = path.parent().ok_or_else(|| "无效的文件路径".to_string())?;
+    let target = dir.join(&new_name);
+    if target.exists() && target != path {
+        return Err("目标文件名已存在".to_string());
+    }
+    fs::rename(path, &target).map_err(|e| e.to_string())?;
+    Ok(target.to_string_lossy().to_string())
+}
+
 /// 返回（并创建）Frameveil 图库根目录：<AppData>/Frameveil/Library
 #[tauri::command]
 fn library_dir(app: tauri::AppHandle) -> Result<String, String> {
@@ -241,6 +258,7 @@ pub fn run() {
             copy_photos,
             write_photo,
             delete_photos,
+            rename_photo,
             library_dir,
             ensure_dir,
             storage_used,

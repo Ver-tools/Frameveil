@@ -5,6 +5,7 @@ import { CirclePlus, Grip, List, Search, SearchX } from 'lucide-vue-next';
 import AppShell from '../components/AppShell.vue';
 import PhotoGrid from '../components/PhotoGrid.vue';
 import AlbumCover from '../components/AlbumCover.vue';
+import DropdownSelect from '../components/DropdownSelect.vue';
 import { albumsWithCounts, library } from '../store/library';
 
 const router = useRouter();
@@ -15,13 +16,30 @@ const view = ref<'grid' | 'list'>(library.settings.defaultView);
 
 const filters = ['全部', '人物', '风景', '街拍', '黑白'];
 
+/** 写真集排序方式 */
+const sortKey = ref<string>('created');
+const sortOptions = [
+  { label: '按创建时间', value: 'created' },
+  { label: '按名称', value: 'name' },
+  { label: '按照片数', value: 'count' },
+];
+
 const filteredAlbums = computed(() => {
   const q = searchQuery.value.trim().toLowerCase();
-  return albumsWithCounts.value.filter((a) => {
+  const list = albumsWithCounts.value.filter((a) => {
     const matchFilter = activeFilter.value === '全部' || a.category === activeFilter.value;
     const matchSearch = !q || a.name.toLowerCase().includes(q);
     return matchFilter && matchSearch;
   });
+  const sorted = [...list];
+  if (sortKey.value === 'name') {
+    sorted.sort((a, b) => a.name.localeCompare(b.name, 'zh'));
+  } else if (sortKey.value === 'count') {
+    sorted.sort((a, b) => b.photoCount - a.photoCount);
+  } else {
+    sorted.sort((a, b) => b.createdAt - a.createdAt);
+  }
+  return sorted;
 });
 
 /** 搜索匹配的照片（按名称 / 标签 / 所属写真集） */
@@ -103,6 +121,9 @@ function openAlbum(id: string) {
           >
             <List :size="18" />
           </button>
+        </div>
+        <div class="sort-select">
+          <DropdownSelect v-model="sortKey" :options="sortOptions" aria-label="写真集排序" />
         </div>
         <label class="search-field">
           <Search :size="14" style="color: var(--muted-foreground); flex-shrink: 0" />
@@ -223,6 +244,18 @@ function openAlbum(id: string) {
   align-items: center;
   gap: 4px;
   margin-left: auto;
+}
+.sort-select {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  height: 36px;
+  border-radius: 999px;
+  background: var(--secondary);
+  transition: background-color 0.18s ease;
+}
+.sort-select:hover {
+  background: var(--muted);
 }
 .search-field {
   display: flex;

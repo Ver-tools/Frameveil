@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import { useRoute } from 'vue-router';
 import { House, Clock, Heart, Tag, Trash2, User, Upload } from 'lucide-vue-next';
+import { library } from '../store/library';
 
 const route = useRoute();
 
@@ -23,6 +25,9 @@ const navGroups = [
   },
 ];
 
+/** 回收站照片数量（用于在侧边栏显示徽标） */
+const trashCount = computed(() => library.photos.filter((p) => p.inTrash).length);
+
 function isActive(to: string): boolean {
   if (to === '/') return route.path === '/';
   return route.path.startsWith(to);
@@ -42,6 +47,13 @@ function isActive(to: string): boolean {
       >
         <component :is="item.icon" :size="18" stroke-width="2" class="nav-icon" />
         <span>{{ item.name }}</span>
+        <span
+          v-if="item.to === '/trash' && trashCount > 0"
+          class="nav-badge"
+          :class="{ active: isActive(item.to) }"
+        >
+          {{ trashCount }}
+        </span>
       </RouterLink>
     </nav>
 
@@ -89,6 +101,10 @@ function isActive(to: string): boolean {
   cursor: pointer;
   transition: background-color 0.18s ease, opacity 0.18s ease;
 }
+.nav-item > span:first-of-type {
+  flex: 1;
+  min-width: 0;
+}
 .nav-item:hover {
   background: var(--sidebar-accent);
 }
@@ -106,6 +122,25 @@ function isActive(to: string): boolean {
   background: var(--sidebar-accent);
   font-weight: 600;
   cursor: default;
+}
+.nav-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--state-error-surface);
+  color: var(--destructive);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.nav-badge.active {
+  background: var(--destructive);
+  color: var(--destructive-foreground);
 }
 .nav-divider {
   border: 0;

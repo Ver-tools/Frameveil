@@ -11,6 +11,7 @@ import {
   ChevronRight,
   ArrowLeft,
   Image as ImageIcon,
+  FolderInput,
 } from 'lucide-vue-next';
 import Modal from '../components/Modal.vue';
 import {
@@ -21,6 +22,9 @@ import {
   trashPhoto,
   updatePhoto,
   setAlbumCover,
+  movePhotoToAlbum,
+  renamePhotoFile,
+  albumsWithCounts,
   toast,
 } from '../store/library';
 import { formatBytes, formatDate } from '../utils/format';
@@ -167,6 +171,7 @@ function remove() {
 /* ── 编辑 ── */
 const editOpen = ref(false);
 const editName = ref('');
+const editFileName = ref('');
 const editDesc = ref('');
 const editTags = ref('');
 
@@ -174,21 +179,52 @@ function openEdit() {
   const p = photo.value;
   if (!p) return;
   editName.value = p.name;
+  editFileName.value = p.fileName;
   editDesc.value = p.description;
   editTags.value = p.tags.join(', ');
   editOpen.value = true;
 }
 
-function saveEdit() {
+async function saveEdit() {
   const p = photo.value;
   if (!p) return;
   const tags = editTags.value
     .split(/[,，]/)
     .map((t) => t.trim())
     .filter(Boolean);
+  // 若文件名变更，先调用 Rust 重命名磁盘文件
+  if (editFileName.value.trim() && editFileName.value.trim() !== p.fileName) {
+    const ok = await renamePhotoFile(p.id, editFileName.value.trim());
+    if (!ok) return;
+  }
   updatePhoto(p.id, { name: editName.value.trim() || p.name, description: editDesc.value.trim(), tags });
   editOpen.value = false;
   toast('照片信息已更新', 'success');
+}
+
+/* ── 移动到写真集 ── */
+const moveOpen = ref(false);
+const targetAlbumId = ref('');
+
+/** 可选目标写真集（排除当前照片所属写真集） */
+const targetAlbums = computed(() =>
+  albumsWithCounts.value.filter((a) => a.id !== photo.value?.albumId)
+);
+
+function openMoveModal() {
+  if (!photo.value) return;
+  targetAlbumId.value = '';
+  moveOpen.value = true;
+}
+
+function applyMove() {
+  const p = photo.value;
+  if (!p || !targetAlbumId.value) {
+    if (!targetAlbumId.value) toast('请选择目标写真集', 'info');
+    return;
+  }
+  movePhotoToAlbum(p.id, targetAlbumId.value);
+  moveOpen.value = false;
 }
 
 /* ── 键盘导航 ── */
@@ -259,6 +295,9 @@ const infoRows = computed(() => {
           @click="onSetCover"
         >
           <ImageIcon :size="18" />
+        </button>
+        <button class="tb-icon" aria-label="移动到写真集" title="移动到写真集" @click="openMoveModal">
+          <FolderInput :size="18" />
         </button>
         <button class="tb-icon" aria-label="分享" title="分享" @click="share">
           <Share2 :size="18" />
@@ -345,11 +384,19 @@ const infoRows = computed(() => {
     </div>
 
     <!-- 编辑照片信息 -->
-    <Modal v-if="editOpen" title="编辑照片" subtitle="修改照片名称、描述与标签" @close="editOpen = false">
+    <Modal v-if="editOpen" title="编辑照片" subtitle="修改照片名称、文件名、描述与标签" @close="editOpen = false">
       <div class="edit-form">
         <label class="modal-field-label" for="edit-photo-name">名称</label>
         <div class="field" style="margin-bottom: 16px">
           <input id="edit-photo-name" class="control" v-model="editName" placeholder="照片名称" />
+        </div>
+
+        <label class="modal-field-label" for="edit-photo-file">
+          文件名
+          <span v-if="photo?.builtin" class="field-hint">（内置示例照片仅修改展示名）</span>
+        </label>
+        <div class="field" style="margin-bottom: 16px">
+          <input id="edit-photo-file" class="control" v-model="editFileName" placeholder="文件名（含扩展名）" />
         </div>
 
         <label class="modal-field-label" for="edit-photo-tags">标签</label>
@@ -369,6 +416,35 @@ const infoRows = computed(() => {
         <div class="modal-actions">
           <button class="btn btn-secondary" type="button" @click="editOpen = false">取消</button>
           <button class="btn btn-primary" type="button" @click="saveEdit">保存</button>
+        </div>
+      </div>
+    </Modal>
+
+    <!-- 移动到写真集 -->
+    <Modal
+      v-if="moveOpen"
+      title="移动到写真集"
+      subtitle="将当前照片移动到目标写真集"
+      @close="moveOpen = false"
+    >
+      <div class="move-form">
+        <div v-if="targetAlbums.length" class="album-pick-list">
+          <button
+            v-for="a in targetAlbums"
+            :key="a.id"
+            class="album-pick"
+            :class="{ active: targetAlbumId === a.id }"
+            type="button"
+            @click="targetAlbumId = a.id"
+          >
+            <span class="album-pick-name">{{ a.name }}</span>
+            <span class="album-pick-meta">{{ a.photoCount }} 张 · {{ a.period }}</span>
+          </button>
+        </div>
+        <p v-else class="move-empty">没有可用的目标写真集</p>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" type="button" @click="moveOpen = false">取消</button>
+          <button class="btn btn-primary" type="button" :disabled="!targetAlbumId" @click="applyMove">移动</button>
         </div>
       </div>
     </Modal>
@@ -645,6 +721,61 @@ const infoRows = computed(() => {
 .edit-textarea:focus {
   border-color: var(--ring);
   box-shadow: 0 0 0 1px var(--ring);
+}
+.field-hint {
+  font-size: 11px;
+  color: var(--muted-foreground);
+  font-weight: 400;
+  margin-left: 6px;
+}
+
+/* 移动到写真集 */
+.move-form {
+  display: flex;
+  flex-direction: column;
+}
+.album-pick-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+  margin-bottom: 16px;
+}
+.album-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: border-color 0.18s ease, background-color 0.18s ease;
+}
+.album-pick:hover {
+  border-color: var(--primary);
+}
+.album-pick.active {
+  border-color: var(--primary);
+  background: var(--accent);
+}
+.album-pick-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+.album-pick-meta {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.move-empty {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--muted-foreground);
 }
 
 .empty-shell {

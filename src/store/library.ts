@@ -393,6 +393,45 @@ export function setAlbumCover(albumId: string, photoSrc: string) {
   toast('已设为写真集封面', 'success');
 }
 
+/** 将单张照片移动到指定写真集（用于查看器中操作） */
+export function movePhotoToAlbum(id: string, targetAlbumId: string) {
+  const target = albumById(targetAlbumId);
+  const p = photoById(id);
+  if (!target || !p) return;
+  if (p.albumId === targetAlbumId) {
+    toast('该照片已在此写真集中', 'info');
+    return;
+  }
+  p.albumId = targetAlbumId;
+  toast(`已移动到「${target.name}」`, 'success');
+}
+
+/**
+ * 重命名磁盘上的照片文件（仅对有 path 的非内置照片生效）。
+ * 同时更新照片记录的 fileName / path / src。
+ */
+export async function renamePhotoFile(id: string, newFileName: string): Promise<boolean> {
+  const p = photoById(id);
+  if (!p) return false;
+  const trimmed = newFileName.trim();
+  if (!trimmed || trimmed === p.fileName) return true;
+  if (p.builtin || !p.path) {
+    // 内置照片无磁盘文件，仅更新展示用的 fileName
+    p.fileName = trimmed;
+    return true;
+  }
+  try {
+    const newPath = await invoke<string>('rename_photo', { from: p.path, newName: trimmed });
+    p.fileName = trimmed;
+    p.path = newPath;
+    p.src = convertFileSrc(newPath);
+    return true;
+  } catch (e) {
+    toast(`重命名失败：${String(e)}`, 'error');
+    return false;
+  }
+}
+
 /* ── 图片查看器 ─────────────────────────────────────────── */
 export function openViewer(
   photos: Photo[],

@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { ref, computed } from 'vue';
 import { Check } from 'lucide-vue-next';
 import AppShell from '../components/AppShell.vue';
+import Modal from '../components/Modal.vue';
 import {
   library,
   selection,
@@ -40,6 +41,14 @@ function onBatchRestore() {
   restorePhotos([...selection.ids]);
   clearSelection();
 }
+
+/* ── 清空回收站二次确认 ── */
+const emptyConfirmOpen = ref(false);
+
+function onEmptyTrashConfirm() {
+  emptyConfirmOpen.value = false;
+  emptyTrash();
+}
 </script>
 
 <template>
@@ -62,7 +71,7 @@ function onBatchRestore() {
           <button class="restore-all-btn" type="button" @click="restoreAllTrash">
             全部恢复
           </button>
-          <button class="empty-trash-btn" type="button" @click="emptyTrash">
+          <button class="empty-trash-btn" type="button" @click="emptyConfirmOpen = true">
             清空回收站
           </button>
         </div>
@@ -118,7 +127,22 @@ function onBatchRestore() {
           取消
         </button>
       </div>
-    </div>
+
+    <!-- 清空回收站二次确认 -->
+    <Modal
+      v-if="emptyConfirmOpen"
+      title="清空回收站"
+      :subtitle="`将永久删除回收站中的 ${trashed.length} 张照片，此操作无法撤销`"
+      @close="emptyConfirmOpen = false"
+    >
+      <div class="modal-actions">
+        <button class="btn btn-secondary" type="button" @click="emptyConfirmOpen = false">取消</button>
+        <button class="btn btn-primary danger-confirm" type="button" @click="onEmptyTrashConfirm">
+          确认清空
+        </button>
+      </div>
+    </Modal>
+  </div>
   </AppShell>
 </template>
 
@@ -382,5 +406,14 @@ function onBatchRestore() {
 }
 .batch-btn-exit:hover {
   color: var(--foreground);
+}
+
+/* 确认清空按钮（危险操作） */
+.danger-confirm {
+  background: var(--destructive);
+  color: var(--destructive-foreground);
+}
+.danger-confirm:hover:not(:disabled) {
+  filter: brightness(0.94);
 }
 </style>
