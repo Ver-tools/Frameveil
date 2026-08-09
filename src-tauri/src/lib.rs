@@ -189,14 +189,6 @@ fn storage_used(app: tauri::AppHandle, path: Option<String>) -> Result<u64, Stri
     Ok(dir_size(&dir))
 }
 
-/// 返回（并创建）缓存目录
-#[tauri::command]
-fn cache_dir(app: tauri::AppHandle) -> Result<String, String> {
-    let dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    Ok(dir.to_string_lossy().to_string())
-}
-
 /// 统计缓存目录占用空间（字节）
 #[tauri::command]
 fn cache_size(app: tauri::AppHandle) -> Result<u64, String> {
@@ -252,7 +244,6 @@ pub fn run() {
             library_dir,
             ensure_dir,
             storage_used,
-            cache_dir,
             cache_size,
             clear_cache,
             backup_dir,

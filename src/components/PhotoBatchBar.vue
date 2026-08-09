@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { open } from '@tauri-apps/plugin-dialog';
-import { Heart, Trash2, Download, CheckSquare, X, Tag } from 'lucide-vue-next';
+import { Heart, Trash2, Download, CheckSquare, X, Tag, FolderInput } from 'lucide-vue-next';
 import Modal from './Modal.vue';
 import {
   selection,
@@ -10,6 +10,8 @@ import {
   favoritePhotos,
   trashPhotos,
   addTagsToPhotos,
+  movePhotosToAlbum,
+  albumsWithCounts,
   toast,
 } from '../store/library';
 import { exportPhotosToDir } from '../utils/exportPhotos';
@@ -91,6 +93,35 @@ async function onExport() {
     exporting.value = false;
   }
 }
+
+/* ── 批量移动到写真集 ── */
+const moveOpen = ref(false);
+const targetAlbumId = ref('');
+
+/** 可选目标写真集（排除当前选中照片所属的写真集，避免无意义移动） */
+const targetAlbums = computed(() => {
+  const currentIds = new Set<string>();
+  for (const p of props.photos) {
+    if (selection.ids.has(p.id)) currentIds.add(p.albumId);
+  }
+  return albumsWithCounts.value.filter((a) => !currentIds.has(a.id) || currentIds.size > 1);
+});
+
+function openMoveModal() {
+  if (!count.value) return;
+  targetAlbumId.value = '';
+  moveOpen.value = true;
+}
+
+function applyMove() {
+  if (!targetAlbumId.value) {
+    toast('请选择目标写真集', 'info');
+    return;
+  }
+  movePhotosToAlbum([...selection.ids], targetAlbumId.value);
+  moveOpen.value = false;
+  setSelectMode(false);
+}
 </script>
 
 <template>
@@ -108,6 +139,10 @@ async function onExport() {
     <button class="batch-btn" type="button" @click="openTagModal">
       <Tag :size="16" />
       <span>标签</span>
+    </button>
+    <button class="batch-btn" type="button" :disabled="!count" @click="openMoveModal">
+      <FolderInput :size="16" />
+      <span>移动到</span>
     </button>
     <button class="batch-btn" type="button" @click="onDelete">
       <Trash2 :size="16" style="color: var(--state-error)" />
@@ -133,6 +168,31 @@ async function onExport() {
       <div class="modal-actions">
         <button class="btn btn-secondary" type="button" @click="tagOpen = false">取消</button>
         <button class="btn btn-primary" type="button" @click="applyTags">添加</button>
+      </div>
+    </div>
+  </Modal>
+
+  <!-- 批量移动到写真集 -->
+  <Modal v-if="moveOpen" title="移动到写真集" :subtitle="`将选中的 ${count} 张照片移动到目标写真集`" @close="moveOpen = false">
+    <div class="move-form">
+      <label class="modal-field-label" for="batch-album">目标写真集</label>
+      <div v-if="targetAlbums.length" class="album-pick-list">
+        <button
+          v-for="a in targetAlbums"
+          :key="a.id"
+          class="album-pick"
+          :class="{ active: targetAlbumId === a.id }"
+          type="button"
+          @click="targetAlbumId = a.id"
+        >
+          <span class="album-pick-name">{{ a.name }}</span>
+          <span class="album-pick-meta">{{ a.photoCount }} 张 · {{ a.period }}</span>
+        </button>
+      </div>
+      <p v-else class="move-empty">没有可用的目标写真集</p>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" type="button" @click="moveOpen = false">取消</button>
+        <button class="btn btn-primary" type="button" :disabled="!targetAlbumId" @click="applyMove">移动</button>
       </div>
     </div>
   </Modal>
@@ -242,5 +302,63 @@ async function onExport() {
   color: var(--muted-foreground);
   font-family: var(--font-mono);
   text-align: right;
+}
+
+/* 按钮禁用态 */
+.batch-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.batch-btn:disabled:hover {
+  background: transparent;
+}
+
+/* 移动到写真集 */
+.move-form {
+  display: flex;
+  flex-direction: column;
+}
+.album-pick-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+  margin-bottom: 16px;
+}
+.album-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: border-color 0.18s ease, background-color 0.18s ease;
+}
+.album-pick:hover {
+  border-color: var(--primary);
+}
+.album-pick.active {
+  border-color: var(--primary);
+  background: var(--accent);
+}
+.album-pick-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+.album-pick-meta {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.move-empty {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--muted-foreground);
 }
 </style>

@@ -339,6 +339,52 @@ export function updateAlbum(id: string, patch: Partial<Album>) {
   if (a) Object.assign(a, patch);
 }
 
+/** 批量将照片移动到指定写真集（仅修改归属，不移动磁盘文件） */
+export function movePhotosToAlbum(ids: Iterable<string>, targetAlbumId: string) {
+  const target = albumById(targetAlbumId);
+  if (!target) return;
+  let n = 0;
+  for (const id of ids) {
+    const p = photoById(id);
+    if (p && !p.inTrash && p.albumId !== targetAlbumId) {
+      p.albumId = targetAlbumId;
+      n += 1;
+    }
+  }
+  if (n) toast(`已移动 ${n} 张照片到「${target.name}」`, 'success');
+}
+
+/** 恢复回收站中选中的照片 */
+export function restorePhotos(ids: Iterable<string>) {
+  let n = 0;
+  for (const id of ids) {
+    const p = photoById(id);
+    if (p && p.inTrash) {
+      p.inTrash = false;
+      p.trashedAt = undefined;
+      n += 1;
+    }
+  }
+  if (n) toast(`已恢复 ${n} 张照片`, 'success');
+}
+
+/** 彻底删除回收站中选中的照片 */
+export async function permanentDeletePhotos(ids: Iterable<string>) {
+  const list = [...ids].map(photoById).filter((p): p is Photo => Boolean(p));
+  if (!list.length) return;
+  const paths = list.filter((p) => p.path && !p.builtin).map((p) => p.path);
+  if (paths.length) {
+    try {
+      await invoke('delete_photos', { paths });
+    } catch {
+      /* 文件可能已不存在 */
+    }
+  }
+  const removeSet = new Set(list.map((p) => p.id));
+  library.photos = library.photos.filter((p) => !removeSet.has(p.id));
+  toast(`已彻底删除 ${list.length} 张照片`, 'success');
+}
+
 /** 将某张照片设为写真集封面 */
 export function setAlbumCover(albumId: string, photoSrc: string) {
   const a = albumById(albumId);

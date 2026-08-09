@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import { ChevronDown, Grip, List, CheckSquare, ArrowLeft } from 'lucide-vue-next';
+import { ChevronDown, Grip, List, CheckSquare, ArrowLeft, Plus } from 'lucide-vue-next';
 import AppShell from '../components/AppShell.vue';
 import PhotoGrid from '../components/PhotoGrid.vue';
 import PhotoBatchBar from '../components/PhotoBatchBar.vue';
@@ -18,9 +19,12 @@ import {
   selection,
   setSelectMode,
   toast,
+  runImport,
+  loadImageSize,
 } from '../store/library';
 import { exportPhotosToDir } from '../utils/exportPhotos';
 import { formatBytes } from '../utils/format';
+import type { PendingFile } from '../types';
 
 const route = useRoute();
 const router = useRouter();
@@ -64,6 +68,98 @@ async function exportAlbum() {
     if (count > 0) toast(`已导出 ${count} 张照片到 ${dir}`, 'success');
   } finally {
     exporting.value = false;
+  }
+}
+
+/* ── 向当前写真集追加照片 ── */
+const adding = ref(false);
+const addProgress = ref(0);
+const addTotal = ref(0);
+
+const IMAGE_EXTS = [
+  'jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'tif', 'tiff', 'bmp',
+  'raw', 'cr2', 'cr3', 'nef', 'arw', 'dng', 'orf',
+];
+const PREVIEWABLE = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'tif', 'tiff', 'bmp'];
+
+function extOf(name: string): string {
+  return name.split('.').pop()?.toLowerCase() ?? '';
+}
+
+async function addPhotos() {
+  if (!album.value || adding.value) return;
+  let selected: string | string[] | null = null;
+  try {
+    selected = await open({
+      multiple: true,
+      title: '选择要追加的照片',
+      filters: [
+        { name: '图片文件', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'tif', 'tiff', 'raw', 'cr2', 'nef', 'arw', 'dng'] },
+        { name: '所有文件', extensions: ['*'] },
+      ],
+    });
+  } catch {
+    toast('当前环境不支持选择文件', 'error');
+    return;
+  }
+  const paths = Array.isArray(selected) ? selected.filter((s): s is string => typeof s === 'string') : [];
+  if (!paths.length) return;
+
+  let infos: { path: string; name: string; size: number; modified: number }[] = [];
+  try {
+    infos = await invoke('get_file_infos', { paths });
+  } catch (e) {
+    toast(`读取文件失败：${String(e)}`, 'error');
+    return;
+  }
+
+  const accepted: PendingFile[] = [];
+  for (const info of infos) {
+    const ext = extOf(info.name);
+    if (!IMAGE_EXTS.includes(ext)) {
+      toast(`已跳过不支持的文件：${info.name}`, 'info');
+      continue;
+    }
+    accepted.push({
+      path: info.path,
+      name: info.name,
+      size: info.size,
+      modified: info.modified,
+      src: PREVIEWABLE.includes(ext) ? convertFileSrc(info.path) : '',
+      width: 0,
+      height: 0,
+      format: ext === 'jpg' || ext === 'jpeg' ? 'JPG' : ext.toUpperCase(),
+    });
+  }
+  if (!accepted.length) return;
+
+  await Promise.all(
+    accepted.map(async (f) => {
+      if (!f.src) return;
+      const { width, height } = await loadImageSize(f.src);
+      f.width = width;
+      f.height = height;
+    })
+  );
+
+  adding.value = true;
+  addProgress.value = 0;
+  addTotal.value = accepted.length;
+  try {
+    await runImport(
+      {
+        files: accepted,
+        albumName: album.value.name,
+        tags: [],
+        targetAlbumId: album.value.id,
+        autoOrganize: library.settings.autoOrganize,
+      },
+      (done) => {
+        addProgress.value = done;
+      }
+    );
+  } finally {
+    adding.value = false;
   }
 }
 
@@ -151,6 +247,10 @@ onMounted(() => {
           <button class="action-btn action-btn-primary" type="button" @click="scrollToPhotos">
             查看全部
           </button>
+          <button class="action-btn action-btn-secondary" type="button" @click="addPhotos">
+            <Plus :size="15" />
+            添加照片
+          </button>
           <button class="action-btn action-btn-secondary" type="button" @click="exportAlbum">
             导出
           </button>
@@ -214,6 +314,16 @@ onMounted(() => {
           <div class="progress-fill" :style="{ width: `${(exportProgress / Math.max(exportTotal, 1)) * 100}%` }"></div>
         </div>
         <span class="progress-text">{{ exportProgress }} / {{ exportTotal }}</span>
+      </div>
+    </Modal>
+
+    <!-- 追加照片进度 -->
+    <Modal v-if="adding" title="正在添加照片" subtitle="正在将所选照片追加到当前写真集…">
+      <div class="export-progress">
+        <div class="progress-track">
+          <div class="progress-fill" :style="{ width: `${(addProgress / Math.max(addTotal, 1)) * 100}%` }"></div>
+        </div>
+        <span class="progress-text">{{ addProgress }} / {{ addTotal }}</span>
       </div>
     </Modal>
 
@@ -371,6 +481,7 @@ onMounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
   height: 36px;
   border: none;
   border-radius: 999px;

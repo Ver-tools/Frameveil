@@ -4,6 +4,7 @@ import { ChevronDown, ExternalLink, FolderOpen } from 'lucide-vue-next';
 import AppShell from '../components/AppShell.vue';
 import ToggleSwitch from '../components/ToggleSwitch.vue';
 import SegControl from '../components/SegControl.vue';
+import DropdownSelect from '../components/DropdownSelect.vue';
 import Modal from '../components/Modal.vue';
 import { library, toast, backupNow } from '../store/library';
 import { formatBytes } from '../utils/format';
@@ -25,6 +26,21 @@ const themeOptions = [
 const viewOptions = [
   { label: '网格', value: 'grid' },
   { label: '列表', value: 'list' },
+];
+const languageOptions = [
+  { label: '简体中文', value: '简体中文' },
+  { label: 'English', value: 'English' },
+  { label: '日本語', value: '日本語' },
+];
+const duplicateOptions = [
+  { label: '跳过', value: '跳过' },
+  { label: '覆盖', value: '覆盖' },
+  { label: '重命名', value: '重命名' },
+];
+const defaultAlbumOptions = [
+  { label: '按日期创建', value: '按日期创建' },
+  { label: '按分类创建', value: '按分类创建' },
+  { label: '手动选择', value: '手动选择' },
 ];
 
 const storageUsed = ref(0);
@@ -126,10 +142,11 @@ onMounted(() => {
           </div>
           <div class="setting-row">
             <span class="row-label">语言</span>
-            <div class="chevron-trigger">
-              <span>{{ library.settings.language }}</span>
-              <ChevronDown :size="16" />
-            </div>
+            <DropdownSelect
+              v-model="library.settings.language"
+              :options="languageOptions"
+              aria-label="语言"
+            />
           </div>
           <div class="setting-row">
             <span class="row-label">默认视图</span>
@@ -194,17 +211,19 @@ onMounted(() => {
           </div>
           <div class="setting-row">
             <span class="row-label">重复文件处理</span>
-            <div class="chevron-trigger">
-              <span>{{ library.settings.duplicateHandling }}</span>
-              <ChevronDown :size="16" />
-            </div>
+            <DropdownSelect
+              v-model="library.settings.duplicateHandling"
+              :options="duplicateOptions"
+              aria-label="重复文件处理"
+            />
           </div>
           <div class="setting-row">
             <span class="row-label">默认写真集</span>
-            <div class="chevron-trigger">
-              <span>{{ library.settings.defaultAlbum }}</span>
-              <ChevronDown :size="16" />
-            </div>
+            <DropdownSelect
+              v-model="library.settings.defaultAlbum"
+              :options="defaultAlbumOptions"
+              aria-label="默认写真集"
+            />
           </div>
           <div class="setting-row">
             <span class="row-label">保留原始文件</span>

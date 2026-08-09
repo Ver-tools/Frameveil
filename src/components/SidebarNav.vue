@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useRoute } from 'vue-router';
-import { House, Clock, Heart, Tag, Trash2, User } from 'lucide-vue-next';
+import { House, Clock, Heart, Tag, Trash2, User, Upload } from 'lucide-vue-next';
 
 const route = useRoute();
 
@@ -16,6 +16,7 @@ const navGroups = [
   {
     label: '管理',
     items: [
+      { name: '导入', to: '/import', icon: Upload },
       { name: '标签', to: '/tags', icon: Tag },
       { name: '回收站', to: '/trash', icon: Trash2 },
     ],
