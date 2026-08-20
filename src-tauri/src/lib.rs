@@ -1,11 +1,14 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use exif::{In, Reader, Tag, Value};
+use image::DynamicImage;
 use serde::Serialize;
+use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 /// 单个文件的元信息（用于导入前的文件列表展示）
 #[derive(Serialize)]
@@ -481,6 +484,262 @@ fn read_exif_batch(paths: Vec<String>) -> Vec<ExifInfo> {
     paths.iter().map(|p| parse_exif(Path::new(p))).collect()
 }
 
+/* ── 缩略图生成 ───────────────────────────────────────────── */
+
+/// 缩略图缓存的文件数上限：超过 HIGH 清理到 LOW（按修改时间删最旧）
+const THUMB_HIGH: usize = 4000;
+const THUMB_LOW: usize = 2500;
+/// 每 N 次调用做一次 LRU 检查
+const THUMB_CHECK_EVERY: u32 = 256;
+static THUMB_CALLS: AtomicU32 = AtomicU32::new(0);
+
+fn thumbs_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| e.to_string())?
+        .join("thumbs");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+/// 缓存键：路径 + 修改时间 + 大小 + 尺寸参数哈希，源文件变化自然失效
+fn thumb_hash(path: &str, mtime_ms: u128, size: u64, max_dim: u32) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = DefaultHasher::new();
+    path.hash(&mut h);
+    mtime_ms.hash(&mut h);
+    size.hash(&mut h);
+    max_dim.hash(&mut h);
+    h.finish()
+}
+
+/// 按 EXIF Orientation（1-8）旋转图片，避免手机照片缩略图方向错误
+fn apply_orientation(img: DynamicImage, orient: u32) -> DynamicImage {
+    match orient {
+        2 => img.fliph(),
+        3 => img.rotate180(),
+        4 => img.flipv(),
+        5 => img.rotate90().fliph(),
+        6 => img.rotate90(),
+        7 => img.rotate270().fliph(),
+        8 => img.rotate270(),
+        _ => img,
+    }
+}
+
+fn read_orientation(path: &Path) -> u32 {
+    let Ok(file) = fs::File::open(path) else {
+        return 1;
+    };
+    match Reader::new().read_from_container(&mut BufReader::new(file)) {
+        Ok(exif) => exif
+            .get_field(Tag::Orientation, In::PRIMARY)
+            .and_then(|f| match &f.value {
+                Value::Short(v) => v.first().map(|&x| x as u32),
+                _ => None,
+            })
+            .filter(|&o| (1..=8).contains(&o))
+            .unwrap_or(1),
+        Err(_) => 1,
+    }
+}
+
+/// LRU 清理：超过 THUMB_HIGH 时按修改时间删最旧至 THUMB_LOW
+fn thumbs_prune(dir: &Path) {
+    let mut entries: Vec<(PathBuf, u64)> = fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let meta = e.metadata().ok()?;
+            let modified = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            Some((e.path(), modified))
+        })
+        .collect();
+    if entries.len() <= THUMB_HIGH {
+        return;
+    }
+    entries.sort_by_key(|(_, m)| *m);
+    let drop_n = entries.len() - THUMB_LOW;
+    for (p, _) in entries.into_iter().take(drop_n) {
+        let _ = fs::remove_file(p);
+    }
+}
+
+/// 生成或获取缩略图（返回缓存文件路径，供前端 convertFileSrc 加载）。
+/// 不支持的格式（RAW / HEIC 等）返回 None，由前端回退原图。
+#[tauri::command]
+async fn get_thumbnail(
+    app: tauri::AppHandle,
+    path: String,
+    max_dim: Option<u32>,
+) -> Result<Option<String>, String> {
+    let max_dim = max_dim.unwrap_or(480).clamp(64, 1600);
+    let src = PathBuf::from(&path);
+    let meta = match fs::metadata(&src) {
+        Ok(m) => m,
+        Err(_) => return Ok(None),
+    };
+    let mtime_ms = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let size = meta.len();
+
+    let dir = thumbs_dir(&app)?;
+    let key = thumb_hash(&path, mtime_ms, size, max_dim);
+    let target = dir.join(format!("{key:016x}.jpg"));
+
+    // 缓存命中：刷新访问时间并直接返回
+    if target.exists() {
+        let _ = filetime_refresh(&target);
+        maybe_prune(&dir);
+        return Ok(Some(target.to_string_lossy().to_string()));
+    }
+
+    // 缩略图生成是 CPU 密集操作，放到阻塞线程池执行
+    let target_clone = target.clone();
+    let generated = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let orientation = read_orientation(&src);
+        let img = image::open(&src).map_err(|e| e.to_string())?;
+        let img = apply_orientation(img, orientation);
+        let thumb = img.thumbnail(max_dim, max_dim);
+        let mut buf = std::io::Cursor::new(Vec::new());
+        let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, 82);
+        thumb
+            .write_with_encoder(encoder)
+            .map_err(|e| e.to_string())?;
+        fs::write(&target_clone, buf.into_inner()).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    match generated {
+        Ok(()) => {
+            maybe_prune(&dir);
+            Ok(Some(target.to_string_lossy().to_string()))
+        }
+        // 解码失败（格式不支持）→ 前端回退原图
+        Err(_) => Ok(None),
+    }
+}
+
+/// 更新文件修改时间，用于 LRU 按最近访问排序
+fn filetime_refresh(path: &Path) -> std::io::Result<()> {
+    let now = SystemTime::now();
+    let f = fs::OpenOptions::new().write(true).open(path)?;
+    f.set_times(fs::FileTimes::new().set_modified(now))
+}
+
+fn maybe_prune(dir: &Path) {
+    let n = THUMB_CALLS.fetch_add(1, Ordering::Relaxed);
+    if n % THUMB_CHECK_EVERY == 0 {
+        thumbs_prune(dir);
+    }
+}
+
+/* ── 批量复制（导入）与进度推送 ───────────────────────────── */
+
+/// 复制进度事件载荷
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyProgress {
+    pub done: usize,
+    pub total: usize,
+    pub file_name: String,
+}
+
+/// 批量复制结果：目标路径（失败项为空字符串）+ 失败索引
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyBatchResult {
+    pub copied: Vec<String>,
+    pub failed: Vec<usize>,
+}
+
+/// 批量复制源文件到目标目录，逐文件通过 progress_event 推送进度。
+/// 单文件失败不中断批次，失败索引记录在 failed 中。
+#[tauri::command]
+async fn copy_photos_batch(
+    app: tauri::AppHandle,
+    sources: Vec<String>,
+    dest_dir: String,
+    on_duplicate: Option<String>,
+    progress_event: String,
+) -> Result<CopyBatchResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let total = sources.len();
+        let dest = PathBuf::from(&dest_dir);
+        fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
+        let policy = on_duplicate.unwrap_or_else(|| "rename".to_string());
+
+        let mut copied: Vec<String> = Vec::with_capacity(total);
+        let mut failed: Vec<usize> = Vec::new();
+
+        for (i, src) in sources.iter().enumerate() {
+            let file_name = Path::new(src)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let _ = app.emit(
+                &progress_event,
+                CopyProgress {
+                    done: i,
+                    total,
+                    file_name: file_name.clone(),
+                },
+            );
+
+            let path = Path::new(src);
+            if !path.exists() {
+                failed.push(i);
+                copied.push(String::new());
+                continue;
+            }
+            let direct = dest.join(&file_name);
+            let target = if direct.exists() {
+                match policy.as_str() {
+                    "skip" => {
+                        copied.push(direct.to_string_lossy().to_string());
+                        continue;
+                    }
+                    "overwrite" => direct,
+                    _ => unique_target(&dest, &file_name),
+                }
+            } else {
+                direct
+            };
+            match fs::copy(path, &target) {
+                Ok(_) => copied.push(target.to_string_lossy().to_string()),
+                Err(_) => {
+                    failed.push(i);
+                    copied.push(String::new());
+                }
+            }
+        }
+
+        let _ = app.emit(
+            &progress_event,
+            CopyProgress {
+                done: total,
+                total,
+                file_name: String::new(),
+            },
+        );
+        Ok(CopyBatchResult { copied, failed })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -489,6 +748,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_file_infos,
             copy_photos,
+            copy_photos_batch,
             write_photo,
             delete_photos,
             rename_photo,
@@ -500,6 +760,7 @@ pub fn run() {
             list_backups,
             write_backup,
             read_exif_batch,
+            get_thumbnail,
             ensure_dir,
             storage_used,
             cache_size,

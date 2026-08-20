@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Check } from 'lucide-vue-next';
 import type { Photo } from '../types';
+import ThumbImg from './ThumbImg.vue';
 
 defineProps<{
   photo: Photo;
@@ -18,7 +19,12 @@ function aspectClass(p: Photo): string {
 
 <template>
   <article class="photo-card" :class="[aspectClass(photo), { selected }]" :title="photo.name">
-    <img :src="photo.src" :alt="photo.name" loading="lazy" decoding="async" />
+    <ThumbImg
+      class="card-img"
+      :path="photo.builtin ? undefined : photo.path"
+      :fallback="photo.src"
+      :alt="photo.name"
+    />
     <button
       v-if="selectable"
       class="select-badge"
@@ -53,19 +59,19 @@ function aspectClass(p: Photo): string {
   border-color: var(--primary);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 45%, transparent);
 }
-.photo-card img {
+.card-img {
   width: 100%;
   object-fit: cover;
   display: block;
   transition: transform 0.2s ease;
 }
-.photo-card.aspect-portrait img {
+.photo-card.aspect-portrait .card-img {
   aspect-ratio: 3 / 4;
 }
-.photo-card.aspect-landscape img {
+.photo-card.aspect-landscape .card-img {
   aspect-ratio: 4 / 3;
 }
-.photo-card:hover img {
+.photo-card:hover .card-img {
   transform: scale(1.02);
 }
 .photo-overlay {
@@ -116,7 +122,7 @@ function aspectClass(p: Photo): string {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .photo-card:hover img {
+  .photo-card:hover .card-img {
     transform: none;
   }
 }

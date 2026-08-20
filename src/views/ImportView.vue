@@ -6,6 +6,7 @@ import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { open } from '@tauri-apps/plugin-dialog';
 import { Upload, Check, ChevronDown, FileText, X } from 'lucide-vue-next';
 import AppShell from '../components/AppShell.vue';
+import ThumbImg from '../components/ThumbImg.vue';
 import ToggleSwitch from '../components/ToggleSwitch.vue';
 import { library, runImport, loadImageSize, toast } from '../store/library';
 import { formatBytes } from '../utils/format';
@@ -232,7 +233,7 @@ onUnmounted(() => {
         <div class="file-heading">已选择 {{ pending.length }} 个文件</div>
         <div class="file-list">
           <div v-for="f in pending" :key="f.path" class="file-row">
-            <img v-if="f.src" :src="f.src" alt="" class="file-thumb" />
+            <ThumbImg v-if="f.src" class="file-thumb" :path="f.path" :fallback="f.src" :max-dim="240" />
             <div v-else class="file-thumb file-thumb-fallback">
               <FileText :size="20" />
             </div>

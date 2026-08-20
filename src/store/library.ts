@@ -1,5 +1,6 @@
 import { reactive, computed, watch } from 'vue';
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import type { Album, Photo, Settings, PendingFile, ExifInfo } from '../types';
 import { buildSeed } from '../seed';
 
@@ -678,25 +679,48 @@ export async function runImport(
   const destDir = payload.autoOrganize === false ? root : `${root}/${sanitized}`;
   const onDuplicate = duplicatePolicy();
 
-  // 逐文件复制，便于展示进度并隔离单个文件失败
-  const newPaths: string[] = [];
-  let failed = 0;
-  for (let i = 0; i < payload.files.length; i++) {
-    const f = payload.files[i];
-    let copiedPath = f.path;
-    try {
-      const res = await invoke<string[]>('copy_photos', {
-        sources: [f.path],
-        destDir,
-        onDuplicate,
-      });
-      copiedPath = res[0] ?? f.path;
-    } catch {
-      failed += 1;
-    }
-    newPaths.push(copiedPath);
-    onProgress?.(i + 1, payload.files.length);
+  // 批量复制（单次 IPC），进度由 Rust 端事件推送
+  interface CopyBatchResult {
+    copied: string[];
+    failed: number[];
   }
+  const progressEvent = `import-progress-${Date.now()}`;
+  const unlisten = await listen<{ done: number; total: number }>(progressEvent, (e) => {
+    onProgress?.(e.payload.done, e.payload.total);
+  });
+  let result: CopyBatchResult;
+  try {
+    result = await invoke<CopyBatchResult>('copy_photos_batch', {
+      sources: payload.files.map((f) => f.path),
+      destDir,
+      onDuplicate,
+      progressEvent,
+    });
+  } catch {
+    // 批量命令不可用（如旧版后端）时回退逐文件复制
+    const copied: string[] = [];
+    const failed: number[] = [];
+    for (let i = 0; i < payload.files.length; i++) {
+      const f = payload.files[i];
+      try {
+        const res = await invoke<string[]>('copy_photos', {
+          sources: [f.path],
+          destDir,
+          onDuplicate,
+        });
+        copied.push(res[0] ?? f.path);
+      } catch {
+        failed.push(i);
+        copied.push('');
+      }
+      onProgress?.(i + 1, payload.files.length);
+    }
+    result = { copied, failed };
+  } finally {
+    unlisten();
+  }
+  const newPaths = result.copied;
+  const failedSet = new Set(result.failed);
 
   // 批量解析 EXIF（拍摄日期 / 相机 / 镜头等）；解析失败不影响导入
   let exifList: ExifInfo[] = [];
@@ -735,13 +759,15 @@ export async function runImport(
 
   const idMap = new Map<string, string>();
   payload.files.forEach((f, i) => {
-    const targetPath = newPaths[i] ?? f.path;
+    const targetPath = newPaths[i] || f.path;
     idMap.set(f.path, targetPath);
   });
 
   const newPhotos: Photo[] = [];
   let lastTakenAt = '';
   for (let i = 0; i < payload.files.length; i++) {
+    // 复制失败的文件不建立照片记录
+    if (failedSet.has(i)) continue;
     const f = payload.files[i];
     const targetPath = idMap.get(f.path) ?? f.path;
     const exif = exifList[i];
@@ -791,8 +817,9 @@ export async function runImport(
   }
 
   library.photos.push(...newPhotos);
+  const failed = failedSet.size;
   if (failed > 0) {
-    toast(`已导入 ${newPhotos.length - failed} 张照片，${failed} 个文件失败`, 'info');
+    toast(`已导入 ${newPhotos.length} 张照片，${failed} 个文件失败`, 'info');
   } else {
     toast(`已导入 ${newPhotos.length} 张照片`, 'success');
   }

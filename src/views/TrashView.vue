@@ -3,6 +3,7 @@ import { ref, computed } from 'vue';
 import { Check } from 'lucide-vue-next';
 import AppShell from '../components/AppShell.vue';
 import Modal from '../components/Modal.vue';
+import ThumbImg from '../components/ThumbImg.vue';
 import {
   library,
   selection,
@@ -88,7 +89,7 @@ function onEmptyTrashConfirm() {
           <span v-if="selection.active" class="row-check" :class="{ checked: selection.ids.has(p.id) }">
             <Check v-if="selection.ids.has(p.id)" :size="12" stroke-width="3.5" />
           </span>
-          <img class="trash-thumb" :src="p.src" :alt="p.name" loading="lazy" />
+          <ThumbImg class="trash-thumb" :path="p.builtin ? undefined : p.path" :fallback="p.src" :alt="p.name" />
           <div class="trash-main">
             <span class="trash-name">{{ p.name }}</span>
             <span class="trash-meta">{{ p.fileName }} · {{ formatBytes(p.size) }}</span>
