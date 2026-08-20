@@ -1,7 +1,10 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use exif::{In, Reader, Tag, Value};
 use serde::Serialize;
 use std::fs;
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::Manager;
 
 /// 单个文件的元信息（用于导入前的文件列表展示）
@@ -234,18 +237,248 @@ fn clear_cache(app: tauri::AppHandle) -> Result<u64, String> {
     Ok(cleared)
 }
 
-/// 返回（并创建）自动备份目录
-#[tauri::command]
-fn backup_dir(app: tauri::AppHandle) -> Result<String, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("Backups");
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    Ok(dir.to_string_lossy().to_string())
+/* ── 图库元数据持久化 ─────────────────────────────────────── */
+
+fn now_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0)
 }
 
-/// 将文本内容写入指定文件（自动备份图库元数据时使用）
+/// 原子写：先写临时文件再重命名，避免写入中断导致文件损坏
+fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, content).map_err(|e| e.to_string())?;
+    fs::rename(&tmp, path).map_err(|e| e.to_string())
+}
+
+/// 返回图库元数据主文件路径 <AppData>/Frameveil/library.json（确保目录存在）
 #[tauri::command]
-fn write_text_file(path: String, content: String) -> Result<(), String> {
-    fs::write(&path, content).map_err(|e| e.to_string())
+fn library_file(app: tauri::AppHandle) -> Result<String, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join("library.json").to_string_lossy().to_string())
+}
+
+/// 读取文本文件；文件不存在时返回 null
+#[tauri::command]
+fn read_text_file(path: String) -> Result<Option<String>, String> {
+    let p = Path::new(&path);
+    if !p.exists() {
+        return Ok(None);
+    }
+    fs::read_to_string(p).map(Some).map_err(|e| e.to_string())
+}
+
+/// 原子写入文本文件（图库元数据持久化时使用）
+#[tauri::command]
+fn write_text_file_atomic(path: String, content: String) -> Result<(), String> {
+    atomic_write(Path::new(&path), &content)
+}
+
+/// 删除单个文件（管理备份文件时使用）
+#[tauri::command]
+fn delete_file(path: String) -> Result<(), String> {
+    let p = Path::new(&path);
+    if p.exists() {
+        fs::remove_file(p).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/* ── 备份轮换 ─────────────────────────────────────────────── */
+
+const KEEP_BACKUPS: usize = 5;
+
+fn backups_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("Backups");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+/// 备份文件条目（前端列表展示 / 恢复用）
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupInfo {
+    name: String,
+    path: String,
+    size: u64,
+    backed_at: u64,
+}
+
+/// 收集备份文件（含旧版固定名备份），按备份时间倒序
+fn collect_backups(dir: &Path) -> Vec<BackupInfo> {
+    let mut list: Vec<BackupInfo> = Vec::new();
+    if let Ok(rd) = fs::read_dir(dir) {
+        for entry in rd.flatten() {
+            let p = entry.path();
+            let name = p
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if !(name.starts_with("library-backup") && name.ends_with(".json")) {
+                continue;
+            }
+            let meta = match entry.metadata() {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            // 优先用文件名中的时间戳，旧版固定名备份回退到文件修改时间
+            let ts_from_name = name
+                .strip_prefix("library-backup-")
+                .and_then(|s| s.strip_suffix(".json"))
+                .and_then(|s| s.parse::<u64>().ok());
+            let modified = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            list.push(BackupInfo {
+                name,
+                path: p.to_string_lossy().to_string(),
+                size: meta.len(),
+                backed_at: ts_from_name.unwrap_or(modified),
+            });
+        }
+    }
+    list.sort_by(|a, b| b.backed_at.cmp(&a.backed_at));
+    list
+}
+
+/// 列出可用备份（按时间倒序）
+#[tauri::command]
+fn list_backups(app: tauri::AppHandle) -> Result<Vec<BackupInfo>, String> {
+    Ok(collect_backups(&backups_dir(&app)?))
+}
+
+/// 写入一份带时间戳的备份，并轮换只保留最近 5 份；返回备份文件路径
+#[tauri::command]
+fn write_backup(app: tauri::AppHandle, content: String) -> Result<String, String> {
+    let dir = backups_dir(&app)?;
+    let target = dir.join(format!("library-backup-{}.json", now_ms()));
+    atomic_write(&target, &content)?;
+    for old in collect_backups(&dir).iter().skip(KEEP_BACKUPS) {
+        let _ = fs::remove_file(&old.path);
+    }
+    Ok(target.to_string_lossy().to_string())
+}
+
+/* ── EXIF 解析 ────────────────────────────────────────────── */
+
+/// 照片 EXIF 摘要（字段无法解析时为 null）
+#[derive(Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ExifInfo {
+    pub taken_at: Option<String>,
+    pub camera: Option<String>,
+    pub lens: Option<String>,
+    pub aperture: Option<String>,
+    pub shutter: Option<String>,
+    pub iso: Option<String>,
+    pub focal_length: Option<String>,
+}
+
+/// 读取 ASCII 型 EXIF 字段（相机 / 镜头型号等）
+fn exif_ascii(exif: &exif::Exif, tag: Tag) -> Option<String> {
+    let s = exif.get_field(tag, In::PRIMARY)?.display_value().to_string();
+    let s = s
+        .trim()
+        .trim_matches('"')
+        .trim_end_matches('\0')
+        .trim()
+        .to_string();
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
+}
+
+/// 读取数值型 EXIF 字段（光圈 / 快门 / ISO / 焦距等）
+fn exif_number(exif: &exif::Exif, tag: Tag) -> Option<f64> {
+    let f = exif.get_field(tag, In::PRIMARY)?;
+    match &f.value {
+        Value::Rational(v) => v.first().map(|r| r.to_f64()),
+        Value::SRational(v) => v.first().map(|r| r.to_f64()),
+        Value::Short(v) => v.first().map(|&x| x as f64),
+        Value::Long(v) => v.first().map(|&x| x as f64),
+        _ => None,
+    }
+}
+
+/// 数值格式化：保留最多 digits 位小数并去掉尾随零
+fn format_trim(v: f64, digits: usize) -> String {
+    let s = format!("{v:.digits$}");
+    let s = s.trim_end_matches('0').trim_end_matches('.');
+    if s.is_empty() {
+        "0".to_string()
+    } else {
+        s.to_string()
+    }
+}
+
+/// 解析单张照片的 EXIF 摘要；无法解析时返回全空字段
+fn parse_exif(path: &Path) -> ExifInfo {
+    let mut info = ExifInfo::default();
+    let Ok(file) = fs::File::open(path) else {
+        return info;
+    };
+    let Ok(exif) = Reader::new().read_from_container(&mut BufReader::new(file)) else {
+        return info;
+    };
+
+    // 拍摄日期：优先 DateTimeOriginal，回退 DateTime
+    for tag in [Tag::DateTimeOriginal, Tag::DateTime] {
+        if let Some(f) = exif.get_field(tag, In::PRIMARY) {
+            let s = f.display_value().to_string();
+            if let Some(date) = s.split_whitespace().next() {
+                let date = date.replace(':', "-");
+                if date.len() == 10 {
+                    info.taken_at = Some(date);
+                    break;
+                }
+            }
+        }
+    }
+
+    info.camera = exif_ascii(&exif, Tag::Model).or_else(|| exif_ascii(&exif, Tag::Make));
+    info.lens = exif_ascii(&exif, Tag::LensModel);
+
+    if let Some(f) = exif_number(&exif, Tag::FNumber) {
+        info.aperture = Some(format!("f/{}", format_trim(f, 2)));
+    }
+    if let Some(t) = exif_number(&exif, Tag::ExposureTime) {
+        info.shutter = if t > 0.0 && t < 1.0 {
+            Some(format!("1/{}s", format_trim(1.0 / t, 0)))
+        } else {
+            Some(format!("{}s", format_trim(t, 1)))
+        };
+    }
+    // ISO：优先经典 0x8827（PhotographicSensitivity），回退新式 0x8833（ISOSpeed）
+    if let Some(iso) = exif_number(&exif, Tag::PhotographicSensitivity)
+        .or_else(|| exif_number(&exif, Tag::ISOSpeed))
+    {
+        info.iso = Some(format!("{}", iso as u64));
+    }
+    if let Some(fl) = exif_number(&exif, Tag::FocalLength) {
+        info.focal_length = Some(format!("{}mm", format_trim(fl, 1)));
+    }
+    info
+}
+
+/// 批量解析照片 EXIF；单个文件失败不影响其他（顺序与入参一致）
+#[tauri::command]
+fn read_exif_batch(paths: Vec<String>) -> Vec<ExifInfo> {
+    paths.iter().map(|p| parse_exif(Path::new(p))).collect()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -260,12 +493,17 @@ pub fn run() {
             delete_photos,
             rename_photo,
             library_dir,
+            library_file,
+            read_text_file,
+            write_text_file_atomic,
+            delete_file,
+            list_backups,
+            write_backup,
+            read_exif_batch,
             ensure_dir,
             storage_used,
             cache_size,
-            clear_cache,
-            backup_dir,
-            write_text_file
+            clear_cache
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

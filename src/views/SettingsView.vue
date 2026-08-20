@@ -1,12 +1,20 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
-import { ChevronDown, ExternalLink, FolderOpen } from 'lucide-vue-next';
+import { ChevronDown, ExternalLink, FolderOpen, RotateCcw, Trash2 } from 'lucide-vue-next';
 import AppShell from '../components/AppShell.vue';
 import ToggleSwitch from '../components/ToggleSwitch.vue';
 import SegControl from '../components/SegControl.vue';
 import DropdownSelect from '../components/DropdownSelect.vue';
 import Modal from '../components/Modal.vue';
-import { library, toast, backupNow } from '../store/library';
+import {
+  library,
+  toast,
+  backupNow,
+  listBackups,
+  deleteBackup,
+  restoreBackup,
+  type BackupEntry,
+} from '../store/library';
 import { formatBytes } from '../utils/format';
 import { getCacheSize, clearAppCache } from '../utils/cache';
 import {
@@ -86,14 +94,67 @@ function checkUpdate() {
 const lastBackupLabel = computed(() => {
   const t = library.settings.lastBackupAt;
   if (!t) return '从未备份';
+  return fmtTime(t);
+});
+
+function fmtTime(t: number): string {
   const d = new Date(t);
   const p = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-});
+}
 
 async function onBackupNow() {
   const ok = await backupNow();
   toast(ok ? '备份已完成' : '备份失败，请检查存储位置', ok ? 'success' : 'error');
+  if (ok) refreshBackups();
+}
+
+/* ── 备份列表 / 恢复 / 删除 ── */
+const backups = ref<BackupEntry[]>([]);
+
+async function refreshBackups() {
+  backups.value = await listBackups();
+}
+
+/** 二次确认弹窗（恢复 / 删除备份共用） */
+const confirmState = ref<{
+  open: boolean;
+  title: string;
+  body: string;
+  danger?: boolean;
+  action: (() => Promise<void>) | null;
+}>({ open: false, title: '', body: '', action: null });
+
+function askRestore(b: BackupEntry) {
+  confirmState.value = {
+    open: true,
+    title: '恢复备份',
+    body: `将把图库整体回滚到 ${fmtTime(b.backedAt)} 的备份状态，当前所有变更（含此后导入的照片记录）会被覆盖。确定恢复吗？`,
+    action: async () => {
+      const ok = await restoreBackup(b.path);
+      if (ok) refreshBackups();
+    },
+  };
+}
+
+function askDelete(b: BackupEntry) {
+  confirmState.value = {
+    open: true,
+    title: '删除备份',
+    body: `确定删除 ${fmtTime(b.backedAt)} 的备份文件吗？删除后无法找回。`,
+    danger: true,
+    action: async () => {
+      const ok = await deleteBackup(b.path);
+      toast(ok ? '备份已删除' : '删除失败', ok ? 'success' : 'error');
+      if (ok) refreshBackups();
+    },
+  };
+}
+
+async function onConfirm() {
+  const action = confirmState.value.action;
+  confirmState.value.open = false;
+  await action?.();
 }
 
 /* ── 协议 / 隐私政策弹窗 ── */
@@ -124,6 +185,7 @@ const privacyBody =
 onMounted(() => {
   refreshStorage();
   refreshCache();
+  refreshBackups();
 });
 </script>
 
@@ -191,11 +253,25 @@ onMounted(() => {
           <div class="setting-row">
             <div>
               <div class="row-label">自动备份</div>
-              <div class="row-desc">上次备份：{{ lastBackupLabel }}</div>
+              <div class="row-desc">上次备份：{{ lastBackupLabel }} · 自动保留最近 5 份</div>
             </div>
             <div class="backup-control">
               <button class="pill-btn" type="button" @click="onBackupNow">立即备份</button>
               <ToggleSwitch v-model="library.settings.autoBackup" label="自动备份" />
+            </div>
+          </div>
+          <div v-for="b in backups" :key="b.path" class="setting-row backup-row">
+            <div class="backup-info">
+              <div class="row-label backup-time">{{ fmtTime(b.backedAt) }}</div>
+              <div class="row-desc">{{ formatBytes(b.size) }} · {{ b.name }}</div>
+            </div>
+            <div class="backup-actions">
+              <button class="pill-btn" type="button" @click="askRestore(b)">
+                <RotateCcw :size="13" /> 恢复
+              </button>
+              <button class="pill-btn danger" type="button" @click="askDelete(b)">
+                <Trash2 :size="13" /> 删除
+              </button>
             </div>
           </div>
         </div>
@@ -288,6 +364,22 @@ onMounted(() => {
       <p class="legal-body">{{ legalBody }}</p>
       <div class="modal-actions">
         <button class="btn btn-primary" type="button" @click="legalOpen = false">我知道了</button>
+      </div>
+    </Modal>
+
+    <!-- 恢复 / 删除备份二次确认 -->
+    <Modal v-if="confirmState.open" :title="confirmState.title" @close="confirmState.open = false">
+      <p class="legal-body">{{ confirmState.body }}</p>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" type="button" @click="confirmState.open = false">取消</button>
+        <button
+          class="btn"
+          :class="confirmState.danger ? 'btn-danger' : 'btn-primary'"
+          type="button"
+          @click="onConfirm"
+        >
+          确定
+        </button>
       </div>
     </Modal>
   </AppShell>
@@ -468,5 +560,39 @@ onMounted(() => {
   align-items: center;
   gap: 12px;
   flex-shrink: 0;
+}
+.backup-row {
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+.backup-row .backup-info {
+  min-width: 0;
+}
+.backup-time {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.backup-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.backup-actions .pill-btn {
+  gap: 5px;
+}
+.pill-btn.danger {
+  color: var(--destructive);
+}
+.pill-btn.danger:hover {
+  background: var(--destructive);
+  color: var(--destructive-foreground);
+}
+.btn-danger {
+  background: var(--destructive);
+  color: var(--destructive-foreground);
+}
+.btn-danger:hover {
+  filter: brightness(1.05);
 }
 </style>

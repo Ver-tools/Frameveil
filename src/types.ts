@@ -83,3 +83,14 @@ export interface PendingFile {
   height: number;
   format: string;
 }
+
+/** EXIF 解析摘要（read_exif_batch 返回；无法解析的字段为 null） */
+export interface ExifInfo {
+  takenAt: string | null;
+  camera: string | null;
+  lens: string | null;
+  aperture: string | null;
+  shutter: string | null;
+  iso: string | null;
+  focalLength: string | null;
+}

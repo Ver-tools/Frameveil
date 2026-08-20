@@ -1,9 +1,30 @@
 import { reactive, computed, watch } from 'vue';
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
-import type { Album, Photo, Settings, PendingFile } from '../types';
+import type { Album, Photo, Settings, PendingFile, ExifInfo } from '../types';
 import { buildSeed } from '../seed';
 
+/** 旧版 localStorage 键（作为迁移源保留，迁移完成后清除） */
 const LS_KEY = 'frameveil:library:v1';
+/** 图库数据结构版本：升级时在 migrate() 中追加迁移逻辑 */
+const SCHEMA_VERSION = 2;
+
+/** 图库元数据主文件（library.json）的存储结构 */
+interface LibraryFileData {
+  schemaVersion: number;
+  albums: Album[];
+  photos: Photo[];
+  settings: Settings;
+  savedAt?: number;
+  backedAt?: number;
+}
+
+/** 备份文件条目（list_backups 返回） */
+export interface BackupEntry {
+  name: string;
+  path: string;
+  size: number;
+  backedAt: number;
+}
 
 /** 默认设置 */
 function defaultSettings(): Settings {
@@ -24,34 +45,43 @@ function defaultSettings(): Settings {
   };
 }
 
-/** 从本地缓存加载；无缓存时生成内置示例图库 */
-function loadState(): { albums: Album[]; photos: Photo[]; settings: Settings } {
+/** 校验并解析图库数据；结构非法时返回 null */
+function parseLibraryData(raw: string): LibraryFileData | null {
   try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed.albums) && Array.isArray(parsed.photos)) {
-        return {
-          albums: parsed.albums as Album[],
-          photos: parsed.photos as Photo[],
-          settings: { ...defaultSettings(), ...(parsed.settings ?? {}) },
-        };
-      }
-    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed.albums) || !Array.isArray(parsed.photos)) return null;
+    return parsed as LibraryFileData;
   } catch {
-    /* 忽略损坏数据 */
+    return null;
   }
-  const seed = buildSeed();
-  return { albums: seed.albums, photos: seed.photos, settings: defaultSettings() };
 }
 
-const initial = loadState();
+/** 数据结构迁移：旧版本 → 当前 SCHEMA_VERSION */
+function migrate(data: LibraryFileData): LibraryFileData {
+  // v1（无版本号）→ v2：无结构变更，仅补全缺失字段并打上版本号
+  const albums = data.albums.map((a) => ({ ...a, tags: Array.isArray(a.tags) ? a.tags : [] }));
+  const photos = data.photos.map((p) => ({ ...p, tags: Array.isArray(p.tags) ? p.tags : [] }));
+  return { ...data, schemaVersion: SCHEMA_VERSION, albums, photos };
+}
 
-/** 全局图库状态 */
+/** 读取旧版 localStorage 数据（作为迁移源） */
+function readLegacyLocalStorage(): LibraryFileData | null {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return null;
+    const parsed = parseLibraryData(raw);
+    if (!parsed) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/** 全局图库状态（初始为空，由 initLibrary() 在应用挂载前填充） */
 export const library = reactive({
-  albums: initial.albums as Album[],
-  photos: initial.photos as Photo[],
-  settings: initial.settings as Settings,
+  albums: [] as Album[],
+  photos: [] as Photo[],
+  settings: defaultSettings() as Settings,
   toasts: [] as { id: number; message: string; kind: 'success' | 'error' | 'info' }[],
   /** 图片查看器的上下文（照片列表与当前索引） */
   viewerContext: null as {
@@ -60,7 +90,91 @@ export const library = reactive({
     albumId?: string;
     back?: { label: string; route: string };
   } | null,
+  /** 初始化完成前为 false，应用挂载等待其变 true */
+  ready: false,
 });
+
+/* ── 初始化：主文件 → 备份 → 旧版 localStorage → 示例数据 ── */
+let libraryFilePath = '';
+/** Rust 文件存储是否可用（浏览器 dev 环境下为 false，回退 localStorage） */
+let fileStorageOk = false;
+/** 初始化 / 恢复备份替换数据时抑制自动保存 */
+let suppressSave = false;
+/** 保存失败只提示一次，避免反复弹 toast */
+let saveFailedNotified = false;
+
+export async function initLibrary(): Promise<void> {
+  if (library.ready) return;
+
+  let invokeAvailable = true;
+  let fileRaw: string | null = null;
+  let fileExists = false;
+  try {
+    libraryFilePath = await invoke<string>('library_file');
+    fileRaw = await invoke<string | null>('read_text_file', { path: libraryFilePath });
+    fileExists = fileRaw !== null;
+    fileStorageOk = true;
+  } catch {
+    // 无 Tauri 环境（纯浏览器 dev）或后端异常
+    invokeAvailable = false;
+  }
+
+  let data: LibraryFileData | null = null;
+  let source: 'file' | 'backup' | 'legacy' | 'seed' = 'seed';
+
+  if (fileExists) {
+    data = parseLibraryData(fileRaw!);
+    if (data) source = 'file';
+  }
+
+  // 主文件存在但损坏 → 自动尝试最新备份
+  if (fileExists && !data && invokeAvailable) {
+    try {
+      const backups = await invoke<BackupEntry[]>('list_backups');
+      for (const b of backups) {
+        const raw = await invoke<string | null>('read_text_file', { path: b.path });
+        if (!raw) continue;
+        const parsed = parseLibraryData(raw);
+        if (parsed) {
+          data = parsed;
+          source = 'backup';
+          break;
+        }
+      }
+    } catch {
+      /* 无备份可用 */
+    }
+  }
+
+  // 无数据 → 旧版 localStorage 一次性迁移
+  if (!data) {
+    const legacy = readLegacyLocalStorage();
+    if (legacy) {
+      data = legacy;
+      source = 'legacy';
+    }
+  }
+
+  // 仍无数据 → 生成内置示例图库
+  if (!data) {
+    const seed = buildSeed();
+    data = { schemaVersion: SCHEMA_VERSION, albums: seed.albums, photos: seed.photos, settings: defaultSettings() };
+    source = 'seed';
+  }
+
+  const migrated = migrate(data);
+  library.albums = migrated.albums;
+  library.photos = migrated.photos;
+  library.settings = { ...defaultSettings(), ...migrated.settings };
+  library.ready = true;
+
+  if (source === 'legacy' || source === 'seed') {
+    await persistNow();
+    if (source === 'legacy') localStorage.removeItem(LS_KEY);
+  }
+  if (source === 'legacy') toast('已将本地图库迁移到新的文件存储', 'success');
+  if (source === 'backup') toast('图库数据异常，已自动从备份恢复', 'info');
+}
 
 /** 照片多选状态（各照片网格共享的瞬时选择） */
 export const selection = reactive({
@@ -92,20 +206,44 @@ export function clearSelection() {
 
 /* ── 持久化 ─────────────────────────────────────────────── */
 let saveTimer: number | undefined;
+
+/** 将当前图库状态写入主文件（原子写）；失败时回退 localStorage 并提示 */
+async function persistNow(): Promise<void> {
+  if (suppressSave) return;
+  const payload: LibraryFileData = {
+    schemaVersion: SCHEMA_VERSION,
+    albums: library.albums,
+    photos: library.photos,
+    settings: library.settings,
+    savedAt: Date.now(),
+  };
+  const json = JSON.stringify(payload);
+  if (fileStorageOk && libraryFilePath) {
+    try {
+      await invoke('write_text_file_atomic', { path: libraryFilePath, content: json });
+      saveFailedNotified = false;
+      return;
+    } catch {
+      if (!saveFailedNotified) {
+        saveFailedNotified = true;
+        toast('图库数据保存失败，本次变更已暂存到浏览器缓存', 'error');
+      }
+    }
+  }
+  // 回退：浏览器 dev 环境或文件写入失败
+  try {
+    localStorage.setItem(LS_KEY, json);
+  } catch {
+    /* 存储空间不足时忽略 */
+  }
+}
+
 watch(
   () => [library.albums, library.photos, library.settings],
   () => {
+    if (!library.ready || suppressSave) return;
     window.clearTimeout(saveTimer);
-    saveTimer = window.setTimeout(() => {
-      try {
-        localStorage.setItem(
-          LS_KEY,
-          JSON.stringify({ albums: library.albums, photos: library.photos, settings: library.settings })
-        );
-      } catch {
-        /* 存储空间不足时忽略 */
-      }
-    }, 200);
+    saveTimer = window.setTimeout(persistNow, 200);
 
     // 开启自动备份时，在本地变更稳定后写入备份文件
     if (library.settings.autoBackup && library.settings.lastBackupAt !== lastBackupWritten) {
@@ -116,23 +254,21 @@ watch(
   { deep: true }
 );
 
-/* ── 自动备份 ───────────────────────────────────────────── */
+/* ── 自动备份（轮换保留最近 5 份） ──────────────────────── */
 let lastBackupWritten = 0;
 let backupTimer: number | undefined;
 
 async function performBackup() {
+  if (!fileStorageOk) return;
   try {
-    const dir = await invoke<string>('backup_dir');
-    const data = JSON.stringify({
+    const content = JSON.stringify({
+      schemaVersion: SCHEMA_VERSION,
       albums: library.albums,
       photos: library.photos,
       settings: library.settings,
       backedAt: Date.now(),
     });
-    await invoke('write_text_file', {
-      path: `${dir.replace(/[\\/]$/, '')}/library-backup.json`,
-      content: data,
-    });
+    await invoke<string>('write_backup', { content });
     lastBackupWritten = Date.now();
     library.settings.lastBackupAt = lastBackupWritten;
   } catch {
@@ -144,6 +280,49 @@ async function performBackup() {
 export async function backupNow(): Promise<boolean> {
   await performBackup();
   return library.settings.lastBackupAt === lastBackupWritten;
+}
+
+/** 列出全部备份（按时间倒序） */
+export async function listBackups(): Promise<BackupEntry[]> {
+  if (!fileStorageOk) return [];
+  try {
+    return await invoke<BackupEntry[]>('list_backups');
+  } catch {
+    return [];
+  }
+}
+
+/** 删除指定备份文件，返回是否成功 */
+export async function deleteBackup(path: string): Promise<boolean> {
+  try {
+    await invoke('delete_file', { path });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 从备份文件恢复图库（替换当前全部数据），返回是否成功 */
+export async function restoreBackup(path: string): Promise<boolean> {
+  try {
+    const raw = await invoke<string | null>('read_text_file', { path });
+    if (!raw) return false;
+    const parsed = parseLibraryData(raw);
+    if (!parsed) return false;
+    const data = migrate(parsed);
+    suppressSave = true;
+    library.albums = data.albums;
+    library.photos = data.photos;
+    library.settings = { ...defaultSettings(), ...data.settings };
+    library.viewerContext = null;
+    suppressSave = false;
+    await persistNow();
+    toast('已从备份恢复图库', 'success');
+    return true;
+  } catch {
+    toast('恢复备份失败', 'error');
+    return false;
+  }
 }
 
 /* ── 提示 ───────────────────────────────────────────────── */
@@ -519,6 +698,14 @@ export async function runImport(
     onProgress?.(i + 1, payload.files.length);
   }
 
+  // 批量解析 EXIF（拍摄日期 / 相机 / 镜头等）；解析失败不影响导入
+  let exifList: ExifInfo[] = [];
+  try {
+    exifList = await invoke<ExifInfo[]>('read_exif_batch', { paths: newPaths });
+  } catch {
+    exifList = [];
+  }
+
   // 建立/复用写真集
   let album = payload.targetAlbumId
     ? albumById(payload.targetAlbumId)
@@ -557,7 +744,9 @@ export async function runImport(
   for (let i = 0; i < payload.files.length; i++) {
     const f = payload.files[i];
     const targetPath = idMap.get(f.path) ?? f.path;
-    lastTakenAt = new Date(f.modified * 1000).toISOString().slice(0, 10);
+    const exif = exifList[i];
+    // 拍摄日期优先取 EXIF DateTimeOriginal，缺失时回退文件修改时间
+    lastTakenAt = exif?.takenAt || new Date(f.modified * 1000).toISOString().slice(0, 10);
     newPhotos.push({
       id: `photo_${Date.now().toString(36)}_${i}_${Math.random().toString(36).slice(2, 8)}`,
       name: f.name.replace(/\.[^.]+$/, ''),
@@ -573,6 +762,12 @@ export async function runImport(
       width: f.width,
       height: f.height,
       format: f.format.toUpperCase(),
+      camera: exif?.camera ?? undefined,
+      lens: exif?.lens ?? undefined,
+      aperture: exif?.aperture ?? undefined,
+      shutter: exif?.shutter ?? undefined,
+      iso: exif?.iso ?? undefined,
+      focalLength: exif?.focalLength ?? undefined,
       isFavorite: false,
       inTrash: false,
       builtin: false,
